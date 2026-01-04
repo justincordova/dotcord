@@ -1,0 +1,67 @@
+# AI Assistant Files
+CLAUDE.MD
+GEMINI.MD
+.claude/
+.claude
+
+# Binaries
+dotman
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories
+vendor/
+
+# Build artifacts
+dist/
+build/
+bin/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+Thumbs.db
+.DS_Store
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Debug files
+debug
+__debug_bin
+
+# GoReleaser
+.goreleaser.yml.cache
+
+# Test fixtures and local testing
+testdata/local/
+*.local
+
+# Environment files
+.env
+.env.local
+.env.*.local
