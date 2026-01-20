@@ -5,7 +5,7 @@ GEMINI.MD
 .claude
 
 # Binaries
-dotman
+dotcord
 *.exe
 *.exe~
 *.dll

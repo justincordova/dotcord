@@ -1,8 +1,8 @@
-# DotMan
+# DotCord
 
 A simple, safe, and powerful dotfile manager built in Go.
 
-DotMan helps you track, backup, and sync your dotfiles across machines with Git integration and a focus on safety.
+DotCord helps you track, backup, and sync your dotfiles across machines with Git integration and a focus on safety.
 
 ---
 
@@ -23,42 +23,42 @@ DotMan helps you track, backup, and sync your dotfiles across machines with Git 
 
 ```bash
 # Clone the repository
-git clone https://github.com/justincordova/dotman.git
-cd dotman
+git clone https://github.com/justincordova/dotcord.git
+cd dotcord
 
 # Build and install
-go build -o dotman cmd/dotman/main.go
-sudo mv dotman /usr/local/bin/
+go build -o dotcord cmd/dotcord/main.go
+sudo mv dotcord /usr/local/bin/
 
 # Or just run directly
-go run cmd/dotman/main.go
+go run cmd/dotcord/main.go
 ```
 
 ### Basic Usage
 
 ```bash
-# Initialize DotMan
-dotman init
+# Initialize DotCord
+dotcord init
 
 # Track your dotfiles
-dotman track ~/.zshrc
-dotman track ~/.gitconfig
-dotman track ~/.config/nvim/init.vim
+dotcord track ~/.zshrc
+dotcord track ~/.gitconfig
+dotcord track ~/.config/nvim/init.vim
 
 # List tracked files
-dotman list
+dotcord list
 
 # Check status (what's different between repo and system)
-dotman status
+dotcord status
 
 # Apply dotfiles from repository to system
-dotman apply
+dotcord apply
 
 # Push to remote Git repository
-dotman push
+dotcord push
 
 # Pull from remote and apply
-dotman pull
+dotcord pull
 ```
 
 ---
@@ -67,21 +67,21 @@ dotman pull
 
 ### Storage Model
 
-DotMan uses a **copy-based** approach:
+DotCord uses a **copy-based** approach:
 
-1. **Track** - Copies your dotfile to `~/.dotman/files/`
+1. **Track** - Copies your dotfile to `~/.dotcord/files/`
 2. **Repository** - Stores dotfiles in a Git repository
 3. **Apply** - Copies dotfiles from repository back to system locations
 
 ```
-~/.zshrc  ──track──>  ~/.dotman/files/zsh/zshrc  ──apply──>  ~/.zshrc
+~/.zshrc  ──track──>  ~/.dotcord/files/zsh/zshrc  ──apply──>  ~/.zshrc
                              (Git repo)
 ```
 
 ### Directory Structure
 
 ```
-~/.dotman/
+~/.dotcord/
 ├── config.yaml          # Metadata: which files are tracked
 ├── files/               # Git repository storing your dotfiles
 │   ├── .git/
@@ -99,50 +99,50 @@ DotMan uses a **copy-based** approach:
 - **Shows diffs** before applying changes
 - **Requires confirmation** for destructive operations
 - **Never silently modifies** your files
-- **Timestamped backups** stored in `~/.dotman/backups/`
+- **Timestamped backups** stored in `~/.dotcord/backups/`
 
 ---
 
 ## Commands
 
-### `dotman init`
+### `dotcord init`
 
-Initialize DotMan repository.
+Initialize DotCord repository.
 
 ```bash
-dotman init
+dotcord init
 ```
 
 Creates:
-- `~/.dotman/` directory structure
-- Git repository in `~/.dotman/files/`
+- `~/.dotcord/` directory structure
+- Git repository in `~/.dotcord/files/`
 - Default configuration file
 
 ---
 
-### `dotman track <file>`
+### `dotcord track <file>`
 
 Track a dotfile.
 
 ```bash
-dotman track ~/.zshrc
-dotman track ~/.config/nvim/init.vim
+dotcord track ~/.zshrc
+dotcord track ~/.config/nvim/init.vim
 ```
 
 What it does:
 1. Validates file exists
-2. Copies to `~/.dotman/files/`
+2. Copies to `~/.dotcord/files/`
 3. Records in `config.yaml`
 4. Git commits automatically
 
 ---
 
-### `dotman list`
+### `dotcord list`
 
 List all tracked dotfiles.
 
 ```bash
-dotman list
+dotcord list
 ```
 
 Output:
@@ -157,12 +157,12 @@ SOURCE PATH                     REPO PATH              TRACKED AT
 
 ---
 
-### `dotman status`
+### `dotcord status`
 
 Show status of tracked dotfiles.
 
 ```bash
-dotman status
+dotcord status
 ```
 
 Compares repository version with system version:
@@ -177,12 +177,12 @@ Status:
 
 ---
 
-### `dotman apply`
+### `dotcord apply`
 
 Apply dotfiles from repository to system.
 
 ```bash
-dotman apply
+dotcord apply
 ```
 
 What it does:
@@ -212,7 +212,7 @@ Applying dotfiles...
  syntax on
 
 Overwrite ~/.config/nvim/init.vim? [y/N/d]: y
-✓ Backed up to: ~/.dotman/backups/2025-01-04_103500_init.vim
+✓ Backed up to: ~/.dotcord/backups/2025-01-04_103500_init.vim
 ✓ Applied from repository
 
 Summary: 1 applied, 1 skipped
@@ -220,12 +220,12 @@ Summary: 1 applied, 1 skipped
 
 ---
 
-### `dotman untrack <file>`
+### `dotcord untrack <file>`
 
 Stop tracking a dotfile.
 
 ```bash
-dotman untrack ~/.zshrc
+dotcord untrack ~/.zshrc
 ```
 
 What it does:
@@ -235,44 +235,44 @@ What it does:
 
 ---
 
-### `dotman push`
+### `dotcord push`
 
 Push dotfiles to Git remote.
 
 ```bash
-dotman push
+dotcord push
 ```
 
 Requires Git remote to be configured:
 ```bash
-cd ~/.dotman/files
+cd ~/.dotcord/files
 git remote add origin git@github.com:yourusername/dotfiles.git
 ```
 
 ---
 
-### `dotman pull`
+### `dotcord pull`
 
 Pull dotfiles from Git remote.
 
 ```bash
-dotman pull
+dotcord pull
 ```
 
 What it does:
 1. Pulls from remote repository
 2. Prompts to apply changes
-3. Runs `dotman apply` if confirmed
+3. Runs `dotcord apply` if confirmed
 
 ---
 
 ## Configuration
 
-Configuration is stored in `~/.dotman/config.yaml`:
+Configuration is stored in `~/.dotcord/config.yaml`:
 
 ```yaml
-repo_path: /Users/you/.dotman
-backup_path: /Users/you/.dotman/backups
+repo_path: /Users/you/.dotcord
+backup_path: /Users/you/.dotcord/backups
 git_enabled: true
 git_remote: ""
 
@@ -292,21 +292,21 @@ You can manually edit this file if needed.
 
 On your main machine:
 ```bash
-dotman init
-dotman track ~/.zshrc
-dotman track ~/.gitconfig
-cd ~/.dotman/files
+dotcord init
+dotcord track ~/.zshrc
+dotcord track ~/.gitconfig
+cd ~/.dotcord/files
 git remote add origin git@github.com:you/dotfiles.git
-dotman push
+dotcord push
 ```
 
 On a new machine:
 ```bash
-# Install DotMan
-dotman init
-cd ~/.dotman/files
+# Install DotCord
+dotcord init
+cd ~/.dotcord/files
 git remote add origin git@github.com:you/dotfiles.git
-dotman pull
+dotcord pull
 # Prompts to apply → your dotfiles are restored!
 ```
 
@@ -317,52 +317,52 @@ dotman pull
 Edit your dotfiles as usual. When you want to update your repository:
 
 ```bash
-dotman status          # See what changed
-dotman track ~/.zshrc  # Update tracked file in repo
-dotman push            # Sync to remote
+dotcord status          # See what changed
+dotcord track ~/.zshrc  # Update tracked file in repo
+dotcord push            # Sync to remote
 ```
 
 Apply changes on another machine:
 
 ```bash
-dotman pull            # Pull and apply
+dotcord pull            # Pull and apply
 ```
 
 ---
 
 ### Recover from Mistakes
 
-DotMan backs up every file before overwriting:
+DotCord backs up every file before overwriting:
 
 ```bash
 # Oops, applied the wrong version
-ls ~/.dotman/backups/
+ls ~/.dotcord/backups/
 # 2025-01-04_103500_zshrc
 
 # Restore from backup
-cp ~/.dotman/backups/2025-01-04_103500_zshrc ~/.zshrc
+cp ~/.dotcord/backups/2025-01-04_103500_zshrc ~/.zshrc
 ```
 
 ---
 
-## Why DotMan?
+## Why DotCord?
 
 ### vs. Manual Git Repository
 
-- **DotMan:** Automatic backups, conflict detection, path normalization
+- **DotCord:** Automatic backups, conflict detection, path normalization
 - **Manual:** You handle everything yourself
 
 ### vs. GNU Stow
 
-- **DotMan:** Copy-based, Git integration, works everywhere
+- **DotCord:** Copy-based, Git integration, works everywhere
 - **Stow:** Symlink-based, requires specific directory structure
 
 ### vs. Chezmoi
 
-- **DotMan:** Simple, minimal, focused on core features
+- **DotCord:** Simple, minimal, focused on core features
 - **Chezmoi:** Feature-rich, templates, more complexity
 
-DotMan is for users who want:
+DotCord is for users who want:
 - Simple dotfile management without learning a complex tool
 - Git integration without manual commits
 - Safety features (backups, diffs, prompts)
@@ -375,8 +375,8 @@ DotMan is for users who want:
 ### Project Structure
 
 ```
-dotman/
-├── cmd/dotman/          # CLI commands (Cobra)
+dotcord/
+├── cmd/dotcord/          # CLI commands (Cobra)
 ├── internal/
 │   ├── config/          # Configuration management
 │   ├── core/            # Business logic
@@ -389,13 +389,13 @@ dotman/
 ### Building
 
 ```bash
-go build -o dotman cmd/dotman/main.go
+go build -o dotcord cmd/dotcord/main.go
 ```
 
 ### Running
 
 ```bash
-go run cmd/dotman/main.go [command]
+go run cmd/dotcord/main.go [command]
 ```
 
 ### Contributing
@@ -444,5 +444,5 @@ Built by Justin Cordova
 
 ## Support
 
-- **Issues:** https://github.com/justincordova/dotman/issues
-- **Discussions:** https://github.com/justincordova/dotman/discussions
+- **Issues:** https://github.com/justincordova/dotcord/issues
+- **Discussions:** https://github.com/justincordova/dotcord/discussions

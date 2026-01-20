@@ -1,12 +1,12 @@
-# DotMan Implementation Plan
+# DotCord Implementation Plan
 
-A detailed, step-by-step implementation plan for building DotMan CLI dotfile manager.
+A detailed, step-by-step implementation plan for building DotCord CLI dotfile manager.
 
 ---
 
 ## Overview
 
-DotMan is a CLI-first dotfile manager built in Go. It tracks dotfiles in a Git repository, backs them up safely, and applies them across machines.
+DotCord is a CLI-first dotfile manager built in Go. It tracks dotfiles in a Git repository, backs them up safely, and applies them across machines.
 
 **Core Design Decisions:**
 - **Storage:** Copy-based (repo stores copies, not symlinks)
@@ -20,18 +20,18 @@ DotMan is a CLI-first dotfile manager built in Go. It tracks dotfiles in a Git r
 ## Project Structure
 
 ```
-dotman/
+dotcord/
 ├── cmd/
-│   └── dotman/
+│   └── dotcord/
 │       ├── main.go           # Entry point + Cobra root command
-│       ├── init.go           # dotman init
-│       ├── track.go          # dotman track <file>
-│       ├── untrack.go        # dotman untrack <file>
-│       ├── list.go           # dotman list
-│       ├── status.go         # dotman status
-│       ├── apply.go          # dotman apply
-│       ├── push.go           # dotman push
-│       └── pull.go           # dotman pull
+│       ├── init.go           # dotcord init
+│       ├── track.go          # dotcord track <file>
+│       ├── untrack.go        # dotcord untrack <file>
+│       ├── list.go           # dotcord list
+│       ├── status.go         # dotcord status
+│       ├── apply.go          # dotcord apply
+│       ├── push.go           # dotcord push
+│       └── pull.go           # dotcord pull
 │
 ├── internal/
 │   ├── config/
@@ -62,11 +62,11 @@ dotman/
 
 ### Config File Structure
 
-**Location:** `~/.dotman/config.yaml`
+**Location:** `~/.dotcord/config.yaml`
 
 ```yaml
-repo_path: /Users/you/.dotman
-backup_path: /Users/you/.dotman/backups
+repo_path: /Users/you/.dotcord
+backup_path: /Users/you/.dotcord/backups
 git_enabled: true
 git_remote: ""  # Optional remote URL
 
@@ -82,10 +82,10 @@ tracked_files:
 
 ### Directory Layout
 
-**Location:** `~/.dotman/`
+**Location:** `~/.dotcord/`
 
 ```
-~/.dotman/
+~/.dotcord/
 ├── config.yaml              # Metadata and tracked files
 ├── files/                   # Git repository storing dotfiles
 │   ├── .git/
@@ -130,10 +130,10 @@ type TrackedFile struct {
 **Required functions:**
 
 ```go
-// LoadConfig loads config from ~/.dotman/config.yaml
+// LoadConfig loads config from ~/.dotcord/config.yaml
 func LoadConfig() (*Config, error)
 
-// SaveConfig writes config to ~/.dotman/config.yaml
+// SaveConfig writes config to ~/.dotcord/config.yaml
 func (c *Config) SaveConfig() error
 
 // AddTrackedFile adds a new tracked file
@@ -151,7 +151,7 @@ func (c *Config) IsTracked(sourcePath string) bool
 
 **Implementation notes:**
 - Use Viper for YAML parsing
-- Default paths: `~/.dotman`, `~/.dotman/backups`
+- Default paths: `~/.dotcord`, `~/.dotcord/backups`
 - Handle missing config gracefully
 
 ---
@@ -170,7 +170,7 @@ func NormalizePath(path string) (string, error)
 func ExpandPath(path string) (string, error)
 
 // GetRepoFilePath returns full path to file in repo
-// Example: zsh/zshrc -> ~/.dotman/files/zsh/zshrc
+// Example: zsh/zshrc -> ~/.dotcord/files/zsh/zshrc
 func GetRepoFilePath(repoPath string) (string, error)
 
 // GenerateRepoPath creates repo path from source path
@@ -275,15 +275,15 @@ func SetRemote(repoPath, remoteName, remoteURL string) error
 
 ### Phase 2: Commands (Implement in Order)
 
-#### 2.1 `dotman init` (`cmd/dotman/init.go`)
+#### 2.1 `dotcord init` (`cmd/dotcord/init.go`)
 
 **What it does:**
-1. Check if `~/.dotman` already exists (prevent re-init)
+1. Check if `~/.dotcord` already exists (prevent re-init)
 2. Create directory structure:
-   - `~/.dotman/`
-   - `~/.dotman/files/`
-   - `~/.dotman/backups/`
-3. Initialize Git repository in `~/.dotman/files/`
+   - `~/.dotcord/`
+   - `~/.dotcord/files/`
+   - `~/.dotcord/backups/`
+3. Initialize Git repository in `~/.dotcord/files/`
 4. Create default `config.yaml`
 5. Success message
 
@@ -292,8 +292,8 @@ func SetRemote(repoPath, remoteName, remoteURL string) error
 ```go
 var initCmd = &cobra.Command{
     Use:   "init",
-    Short: "Initialize DotMan repository",
-    Long:  `Creates ~/.dotman directory structure and initializes Git repository.`,
+    Short: "Initialize DotCord repository",
+    Long:  `Creates ~/.dotcord directory structure and initializes Git repository.`,
     Run:   runInit,
 }
 
@@ -305,15 +305,15 @@ func runInit(cmd *cobra.Command, args []string) {
 **Output example:**
 
 ```
-✓ Created ~/.dotman/
-✓ Created ~/.dotman/files/
-✓ Created ~/.dotman/backups/
+✓ Created ~/.dotcord/
+✓ Created ~/.dotcord/files/
+✓ Created ~/.dotcord/backups/
 ✓ Initialized Git repository
 ✓ Created config.yaml
 
-DotMan is ready! Next steps:
-  dotman track ~/.zshrc
-  dotman list
+DotCord is ready! Next steps:
+  dotcord track ~/.zshrc
+  dotcord list
 ```
 
 **Error handling:**
@@ -323,14 +323,14 @@ DotMan is ready! Next steps:
 
 ---
 
-#### 2.2 `dotman track <file>` (`cmd/dotman/track.go`)
+#### 2.2 `dotcord track <file>` (`cmd/dotcord/track.go`)
 
 **What it does:**
 1. Validate file exists and is readable
 2. Normalize source path (convert to ~ notation)
 3. Check if already tracked
 4. Generate repo path (e.g., `zsh/zshrc`)
-5. Copy file to `~/.dotman/files/{repo_path}`
+5. Copy file to `~/.dotcord/files/{repo_path}`
 6. Add to config.yaml
 7. Git commit (if enabled): "Track {source_path}"
 8. Success message
@@ -351,7 +351,7 @@ var trackCmd = &cobra.Command{
 ```
 ✓ Tracking ~/.zshrc
   Stored as: zsh/zshrc
-  Location: ~/.dotman/files/zsh/zshrc
+  Location: ~/.dotcord/files/zsh/zshrc
 ✓ Committed to Git
 ```
 
@@ -363,7 +363,7 @@ var trackCmd = &cobra.Command{
 
 ---
 
-#### 2.3 `dotman list` (`cmd/dotman/list.go`)
+#### 2.3 `dotcord list` (`cmd/dotcord/list.go`)
 
 **What it does:**
 1. Load config
@@ -394,11 +394,11 @@ SOURCE PATH                     REPO PATH              TRACKED AT
 
 **Error handling:**
 - No tracked files: friendly message
-- Config not found: suggest running `dotman init`
+- Config not found: suggest running `dotcord init`
 
 ---
 
-#### 2.4 `dotman status` (`cmd/dotman/status.go`)
+#### 2.4 `dotcord status` (`cmd/dotcord/status.go`)
 
 **What it does:**
 1. Load config
@@ -434,7 +434,7 @@ Status:
 
 ---
 
-#### 2.5 `dotman apply` (`cmd/dotman/apply.go`)
+#### 2.5 `dotcord apply` (`cmd/dotcord/apply.go`)
 
 **What it does:**
 1. Load config
@@ -475,7 +475,7 @@ Applying dotfiles...
  syntax on
 
 Overwrite ~/.config/nvim/init.vim? [y/N/d]: y
-✓ Backed up to: ~/.dotman/backups/2025-01-04_103500_init.vim
+✓ Backed up to: ~/.dotcord/backups/2025-01-04_103500_init.vim
 ✓ Applied from repository
 
 ! ~/.gitconfig                  Missing from system
@@ -490,13 +490,13 @@ Summary: 2 applied, 1 skipped, 0 errors
 
 ---
 
-#### 2.6 `dotman untrack <file>` (`cmd/dotman/untrack.go`)
+#### 2.6 `dotcord untrack <file>` (`cmd/dotcord/untrack.go`)
 
 **What it does:**
 1. Validate file is tracked
 2. Remove from config.yaml
 3. Prompt: "Delete from repository? [y/N]"
-4. If yes: delete from `~/.dotman/files/`
+4. If yes: delete from `~/.dotcord/files/`
 5. Git commit: "Untrack {source_path}"
 
 **Command definition:**
@@ -521,7 +521,7 @@ var untrackCmd = &cobra.Command{
 
 ---
 
-#### 2.7 `dotman push` (`cmd/dotman/push.go`)
+#### 2.7 `dotcord push` (`cmd/dotcord/push.go`)
 
 **What it does:**
 1. Check if Git remote is configured
@@ -552,13 +552,13 @@ var pushCmd = &cobra.Command{
 
 ---
 
-#### 2.8 `dotman pull` (`cmd/dotman/pull.go`)
+#### 2.8 `dotcord pull` (`cmd/dotcord/pull.go`)
 
 **What it does:**
 1. Check if Git remote is configured
 2. Git pull from remote
 3. Prompt: "Apply pulled changes? [y/N]"
-4. If yes: run `dotman apply`
+4. If yes: run `dotcord apply`
 
 **Command definition:**
 
@@ -576,7 +576,7 @@ var pullCmd = &cobra.Command{
 ✓ Pulled from origin
 ? Apply changes to system? [y/N]: y
 
-[... runs dotman apply ...]
+[... runs dotcord apply ...]
 ```
 
 ---
@@ -587,23 +587,23 @@ var pullCmd = &cobra.Command{
 
 ```bash
 # Initialize
-dotman init
+dotcord init
 
 # Track some files
-dotman track ~/.zshrc
-dotman track ~/.gitconfig
-dotman list
+dotcord track ~/.zshrc
+dotcord track ~/.gitconfig
+dotcord list
 
 # Modify a system file
 echo "# test" >> ~/.zshrc
-dotman status
+dotcord status
 
 # Apply from repo (should show diff and prompt)
-dotman apply
+dotcord apply
 
 # Test on "new machine" (simulate by moving files)
 mv ~/.zshrc ~/.zshrc.bak
-dotman apply
+dotcord apply
 ```
 
 #### 3.2 Edge Cases to Test
@@ -636,15 +636,15 @@ dotman apply
 - [ ] `internal/git/git.go` - Git wrapper
 
 **Commands (build in order):**
-- [ ] `cmd/dotman/main.go` - Cobra setup
-- [ ] `cmd/dotman/init.go` - Initialize DotMan
-- [ ] `cmd/dotman/track.go` - Track files
-- [ ] `cmd/dotman/list.go` - List tracked files
-- [ ] `cmd/dotman/status.go` - Show status
-- [ ] `cmd/dotman/apply.go` - Apply dotfiles
-- [ ] `cmd/dotman/untrack.go` - Untrack files
-- [ ] `cmd/dotman/push.go` - Git push
-- [ ] `cmd/dotman/pull.go` - Git pull
+- [ ] `cmd/dotcord/main.go` - Cobra setup
+- [ ] `cmd/dotcord/init.go` - Initialize DotCord
+- [ ] `cmd/dotcord/track.go` - Track files
+- [ ] `cmd/dotcord/list.go` - List tracked files
+- [ ] `cmd/dotcord/status.go` - Show status
+- [ ] `cmd/dotcord/apply.go` - Apply dotfiles
+- [ ] `cmd/dotcord/untrack.go` - Untrack files
+- [ ] `cmd/dotcord/push.go` - Git push
+- [ ] `cmd/dotcord/pull.go` - Git pull
 
 **Testing:**
 - [ ] Manual end-to-end test flow
