@@ -1,4 +1,4 @@
-module github.com/justincordova/dotcord
+module github.com/justincordova/dotcor
 
 go 1.25.5
 

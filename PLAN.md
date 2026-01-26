@@ -1,37 +1,40 @@
-# DotCord Implementation Plan
+# DotCor Implementation Plan
 
-A detailed, step-by-step implementation plan for building DotCord CLI dotfile manager.
+A detailed, step-by-step implementation plan for building DotCor - a symlink-based dotfile manager with Git automation.
 
 ---
 
 ## Overview
 
-DotCord is a CLI-first dotfile manager built in Go. It tracks dotfiles in a Git repository, backs them up safely, and applies them across machines.
+DotCor is a CLI-first dotfile manager built in Go. It uses **symlinks** to keep your dotfiles in a Git repository while making them accessible in their original locations.
 
 **Core Design Decisions:**
-- **Storage:** Copy-based (repo stores copies, not symlinks)
-- **Git:** Automatic initialization and commits
-- **Conflicts:** Backup + show diff + user prompt
+- **Storage:** Symlink-based (files live in repo, symlinks point to them)
+- **Git:** Automatic commits after every operation
+- **Conflicts:** Let Git handle merges (we provide helpful messages)
 - **Config:** YAML format with Viper
 - **Paths:** Normalize to `~` for portability
+- **Cross-platform:** macOS/Linux native, Windows with fallback to copy
+
+**Key Differentiator:** GNU Stow's simplicity + Git automation built-in
 
 ---
 
 ## Project Structure
 
 ```
-dotcord/
+dotcor/
 ├── cmd/
-│   └── dotcord/
+│   └── dotcor/
 │       ├── main.go           # Entry point + Cobra root command
-│       ├── init.go           # dotcord init
-│       ├── track.go          # dotcord track <file>
-│       ├── untrack.go        # dotcord untrack <file>
-│       ├── list.go           # dotcord list
-│       ├── status.go         # dotcord status
-│       ├── apply.go          # dotcord apply
-│       ├── push.go           # dotcord push
-│       └── pull.go           # dotcord pull
+│       ├── init.go           # dotcor init
+│       ├── add.go            # dotcor add <file>
+│       ├── remove.go         # dotcor remove <file>
+│       ├── list.go           # dotcor list
+│       ├── status.go         # dotcor status
+│       ├── sync.go           # dotcor sync
+│       ├── restore.go        # dotcor restore <file>
+│       └── history.go        # dotcor history <file>
 │
 ├── internal/
 │   ├── config/
@@ -39,13 +42,12 @@ dotcord/
 │   │   └── paths.go          # Path normalization utilities
 │   │
 │   ├── core/
-│   │   ├── tracker.go        # Track/untrack business logic
-│   │   ├── applier.go        # Apply logic with conflict resolution
-│   │   └── differ.go         # File comparison and diff display
+│   │   ├── linker.go         # Symlink creation/removal logic
+│   │   └── validator.go      # File/path validation
 │   │
 │   ├── fs/
-│   │   ├── fs.go             # File operations (copy, backup)
-│   │   └── validate.go       # File validation
+│   │   ├── fs.go             # File operations (move, copy fallback)
+│   │   └── symlink.go        # Cross-platform symlink handling
 │   │
 │   └── git/
 │       └── git.go            # Git command wrapper
@@ -62,39 +64,44 @@ dotcord/
 
 ### Config File Structure
 
-**Location:** `~/.dotcord/config.yaml`
+**Location:** `~/.dotcor/config.yaml`
 
 ```yaml
-repo_path: /Users/you/.dotcord
-backup_path: /Users/you/.dotcord/backups
+repo_path: ~/.dotcor/files
 git_enabled: true
 git_remote: ""  # Optional remote URL
 
-tracked_files:
+managed_files:
   - source_path: ~/.zshrc
-    repo_path: zsh/zshrc
-    tracked_at: 2025-01-04T10:30:00Z
+    repo_path: shell/zshrc
+    added_at: 2025-01-04T10:30:00Z
+    platforms: []  # Empty = all platforms, or ["darwin", "linux", "windows"]
 
   - source_path: ~/.config/nvim/init.vim
     repo_path: nvim/init.vim
-    tracked_at: 2025-01-04T10:31:00Z
+    added_at: 2025-01-04T10:31:00Z
+    platforms: []
 ```
 
 ### Directory Layout
 
-**Location:** `~/.dotcord/`
+**Location:** `~/.dotcor/`
 
 ```
-~/.dotcord/
-├── config.yaml              # Metadata and tracked files
-├── files/                   # Git repository storing dotfiles
-│   ├── .git/
-│   ├── zsh/
-│   │   └── zshrc
-│   └── nvim/
-│       └── init.vim
-└── backups/                 # Timestamped backups
-    └── 2025-01-04_103000_zshrc
+~/.dotcor/
+├── config.yaml              # Metadata: which files are managed
+└── files/                   # Git repository with actual dotfiles
+    ├── .git/
+    ├── shell/
+    │   ├── zshrc            ← actual file
+    │   └── bashrc           ← actual file
+    └── nvim/
+        └── init.vim         ← actual file
+
+# System locations (symlinks):
+~/.zshrc                     → symlink to ~/.dotcor/files/shell/zshrc
+~/.bashrc                    → symlink to ~/.dotcor/files/shell/bashrc
+~/.config/nvim/init.vim      → symlink to ~/.dotcor/files/nvim/init.vim
 ```
 
 ---
@@ -113,46 +120,50 @@ package config
 import "time"
 
 type Config struct {
-    RepoPath     string        `yaml:"repo_path"`
-    BackupPath   string        `yaml:"backup_path"`
+    RepoPath     string        `yaml:"repo_path"`      // ~/.dotcor/files
     GitEnabled   bool          `yaml:"git_enabled"`
     GitRemote    string        `yaml:"git_remote"`
-    TrackedFiles []TrackedFile `yaml:"tracked_files"`
+    ManagedFiles []ManagedFile `yaml:"managed_files"`
 }
 
-type TrackedFile struct {
-    SourcePath string    `yaml:"source_path"`  // ~/.zshrc (normalized)
-    RepoPath   string    `yaml:"repo_path"`    // zsh/zshrc (relative to files/)
-    TrackedAt  time.Time `yaml:"tracked_at"`
+type ManagedFile struct {
+    SourcePath string    `yaml:"source_path"`  // ~/.zshrc (normalized, with ~)
+    RepoPath   string    `yaml:"repo_path"`    // shell/zshrc (relative to files/)
+    AddedAt    time.Time `yaml:"added_at"`
+    Platforms  []string  `yaml:"platforms"`    // ["darwin", "linux"] or empty for all
 }
 ```
 
 **Required functions:**
 
 ```go
-// LoadConfig loads config from ~/.dotcord/config.yaml
+// LoadConfig loads config from ~/.dotcor/config.yaml
 func LoadConfig() (*Config, error)
 
-// SaveConfig writes config to ~/.dotcord/config.yaml
+// SaveConfig writes config to ~/.dotcor/config.yaml
 func (c *Config) SaveConfig() error
 
-// AddTrackedFile adds a new tracked file
-func (c *Config) AddTrackedFile(tf TrackedFile) error
+// AddManagedFile adds a new managed file
+func (c *Config) AddManagedFile(mf ManagedFile) error
 
-// RemoveTrackedFile removes a tracked file by source path
-func (c *Config) RemoveTrackedFile(sourcePath string) error
+// RemoveManagedFile removes a managed file by source path
+func (c *Config) RemoveManagedFile(sourcePath string) error
 
-// GetTrackedFile retrieves tracked file by source path
-func (c *Config) GetTrackedFile(sourcePath string) (*TrackedFile, error)
+// GetManagedFile retrieves managed file by source path
+func (c *Config) GetManagedFile(sourcePath string) (*ManagedFile, error)
 
-// IsTracked checks if a file is already tracked
-func (c *Config) IsTracked(sourcePath string) bool
+// IsManaged checks if a file is already managed
+func (c *Config) IsManaged(sourcePath string) bool
+
+// GetManagedFilesForPlatform returns files that should be linked on current platform
+func (c *Config) GetManagedFilesForPlatform() []ManagedFile
 ```
 
 **Implementation notes:**
 - Use Viper for YAML parsing
-- Default paths: `~/.dotcord`, `~/.dotcord/backups`
+- Default repo path: `~/.dotcor/files`
 - Handle missing config gracefully
+- Platform detection: use `runtime.GOOS` (darwin, linux, windows)
 
 ---
 
@@ -167,81 +178,174 @@ func NormalizePath(path string) (string, error)
 
 // ExpandPath converts ~ notation to absolute path
 // Example: ~/.zshrc -> /Users/you/.zshrc
+// Also handles environment variables: $XDG_CONFIG_HOME, %APPDATA%, etc.
 func ExpandPath(path string) (string, error)
 
 // GetRepoFilePath returns full path to file in repo
-// Example: zsh/zshrc -> ~/.dotcord/files/zsh/zshrc
-func GetRepoFilePath(repoPath string) (string, error)
+// Example: shell/zshrc -> ~/.dotcor/files/shell/zshrc
+func GetRepoFilePath(config *Config, repoPath string) (string, error)
 
 // GenerateRepoPath creates repo path from source path
 // Example: ~/.config/nvim/init.vim -> nvim/init.vim
-func GenerateRepoPath(sourcePath string) string
+// Example: ~/.zshrc -> shell/zshrc
+func GenerateRepoPath(sourcePath string) (string, error)
 
-// GetBackupFileName generates timestamped backup filename
-// Example: ~/.zshrc -> 2025-01-04_103000_zshrc
-func GetBackupFileName(sourcePath string) string
+// GetCurrentPlatform returns current OS identifier
+// Returns: "darwin", "linux", or "windows"
+func GetCurrentPlatform() string
+
+// ShouldApplyOnPlatform checks if file should be linked on current platform
+func ShouldApplyOnPlatform(platforms []string) bool
+```
+
+**Repo path generation algorithm:**
+
+```
+Input: ~/.zshrc
+1. Strip home directory: .zshrc
+2. Determine category from filename: "shell"
+3. Strip leading dot: zshrc
+4. Output: shell/zshrc
+
+Input: ~/.config/nvim/init.vim
+1. Strip home directory: .config/nvim/init.vim
+2. Strip .config/: nvim/init.vim
+3. Output: nvim/init.vim
+
+Input: ~/.gitconfig
+1. Strip home directory: .gitconfig
+2. Determine category from filename: "git"
+3. Strip leading dot: gitconfig
+4. Output: git/gitconfig
+```
+
+**Category mapping (for top-level dotfiles):**
+```go
+var categoryMap = map[string]string{
+    ".zshrc":      "shell",
+    ".bashrc":     "shell",
+    ".bash_profile": "shell",
+    ".gitconfig":  "git",
+    ".gitignore":  "git",
+    ".vimrc":      "vim",
+    ".tmux.conf":  "tmux",
+    // Add more as needed
+}
 ```
 
 **Implementation notes:**
 - Use `os.UserHomeDir()` for home directory
+- Use `filepath.Clean()` to normalize separators (handles / vs \ automatically)
+- Support env variables: `os.ExpandEnv()` handles $VAR and %VAR%
 - Handle edge cases: no home dir, already absolute, etc.
-- Repo path generation: strip leading dot, flatten structure intelligently
 
 ---
 
-#### 1.3 File Operations (`internal/fs/fs.go`)
+#### 1.3 Symlink Operations (`internal/fs/symlink.go`)
 
 **Required functions:**
 
 ```go
-// CopyFile copies file with permissions preserved
-func CopyFile(src, dst string) error
+// CreateSymlink creates a symlink from link to target
+// On Windows: falls back to copying if symlink fails (no admin/dev mode)
+func CreateSymlink(target, link string) error
 
-// BackupFile creates timestamped backup of file
-func BackupFile(sourcePath, backupDir string) (string, error)
+// RemoveSymlink removes a symlink
+func RemoveSymlink(link string) error
+
+// IsSymlink checks if path is a symlink
+func IsSymlink(path string) (bool, error)
+
+// ReadSymlink reads the target of a symlink
+func ReadSymlink(link string) (string, error)
+
+// IsValidSymlink checks if symlink exists and points to existing target
+func IsValidSymlink(link string) (bool, error)
+
+// SupportsSymlinks checks if current platform supports symlinks
+// Windows: requires admin rights or developer mode
+func SupportsSymlinks() bool
+```
+
+**Cross-platform symlink handling:**
+
+```go
+func CreateSymlink(target, link string) error {
+    // Ensure parent directory exists
+    if err := EnsureDir(filepath.Dir(link)); err != nil {
+        return err
+    }
+
+    // Try creating symlink
+    err := os.Symlink(target, link)
+    if err != nil {
+        // On Windows, if symlink fails, fall back to copy
+        if runtime.GOOS == "windows" {
+            fmt.Println("⚠ Symlink failed, copying file instead")
+            fmt.Println("  Enable Developer Mode for symlink support")
+            return CopyFile(target, link)
+        }
+        return err
+    }
+    return nil
+}
+```
+
+---
+
+#### 1.4 File Operations (`internal/fs/fs.go`)
+
+**Required functions:**
+
+```go
+// MoveFile moves a file from src to dst
+func MoveFile(src, dst string) error
+
+// CopyFile copies file with permissions preserved (Windows fallback)
+func CopyFile(src, dst string) error
 
 // FileExists checks if file exists
 func FileExists(path string) bool
 
-// FilesIdentical compares two files byte-by-byte
-func FilesIdentical(path1, path2 string) (bool, error)
-
 // EnsureDir creates directory if it doesn't exist
 func EnsureDir(path string) error
 
-// GetFileDiff returns unified diff between two files
-func GetFileDiff(path1, path2, label1, label2 string) (string, error)
+// IsDirectory checks if path is a directory
+func IsDirectory(path string) (bool, error)
 ```
 
 **Implementation notes:**
-- Preserve file permissions when copying
+- Preserve file permissions when copying/moving
 - Create parent directories as needed
 - Use `io.Copy` for efficient file copying
-- For diff: consider using `os/exec` with system `diff` or a Go diff library
 
 ---
 
-#### 1.4 File Validation (`internal/fs/validate.go`)
+#### 1.5 Validation (`internal/core/validator.go`)
 
 **Required functions:**
 
 ```go
-// ValidateSourceFile checks if source file is valid for tracking
+// ValidateSourceFile checks if source file is valid for adding
 func ValidateSourceFile(path string) error
 
 // ValidateRepoPath checks if repo path is valid
 func ValidateRepoPath(path string) error
+
+// ValidateNotAlreadyManaged checks if file is not already managed
+func ValidateNotAlreadyManaged(config *Config, sourcePath string) error
 ```
 
 **Validation rules:**
 - File must exist
 - File must be readable
-- File must not be a directory (for MVP)
-- Path must be absolute or start with ~
+- Can be file or directory
+- Path must be absolute or start with ~ or contain env variables
+- Must not already be a symlink pointing to our repo
 
 ---
 
-#### 1.5 Git Wrapper (`internal/git/git.go`)
+#### 1.6 Git Wrapper (`internal/git/git.go`)
 
 **Required functions:**
 
@@ -249,133 +353,185 @@ func ValidateRepoPath(path string) error
 // InitRepo initializes git repository in directory
 func InitRepo(repoPath string) error
 
-// Commit stages all changes and commits with message
-func Commit(repoPath, message string) error
+// AutoCommit stages all changes and commits with message
+func AutoCommit(repoPath, message string) error
 
-// Push pushes to remote (if configured)
-func Push(repoPath string) error
-
-// Pull pulls from remote (if configured)
-func Pull(repoPath string) error
+// Sync commits all changes and pushes to remote (if configured)
+func Sync(repoPath string) error
 
 // HasChanges checks if working tree has uncommitted changes
 func HasChanges(repoPath string) (bool, error)
 
 // SetRemote configures git remote
 func SetRemote(repoPath, remoteName, remoteURL string) error
+
+// GetStatus returns git status information
+func GetStatus(repoPath string) (StatusInfo, error)
+
+// GetFileHistory returns git log for specific file
+func GetFileHistory(repoPath, filePath string) ([]CommitInfo, error)
+
+// RestoreFile restores file from git history
+func RestoreFile(repoPath, filePath, ref string) error
+
+// IsGitInstalled checks if git command is available
+func IsGitInstalled() bool
+```
+
+**Status information:**
+
+```go
+type StatusInfo struct {
+    HasUncommitted bool
+    AheadBy        int
+    BehindBy       int
+    Branch         string
+}
+
+type CommitInfo struct {
+    Hash      string
+    Author    string
+    Date      time.Time
+    Message   string
+}
 ```
 
 **Implementation notes:**
 - Use `os/exec.Command("git", ...)`
-- Run git commands in repo directory
+- Run git commands in repo directory with `cmd.Dir = repoPath`
 - Capture stderr for error messages
-- Check if git is installed
+- Check if git is installed at startup
+- Auto-commit should be silent (don't spam output)
 
 ---
 
 ### Phase 2: Commands (Implement in Order)
 
-#### 2.1 `dotcord init` (`cmd/dotcord/init.go`)
+#### 2.1 `dotcor init` (`cmd/dotcor/init.go`)
 
 **What it does:**
-1. Check if `~/.dotcord` already exists (prevent re-init)
+1. Check if `~/.dotcor` already exists (prevent re-init)
 2. Create directory structure:
-   - `~/.dotcord/`
-   - `~/.dotcord/files/`
-   - `~/.dotcord/backups/`
-3. Initialize Git repository in `~/.dotcord/files/`
+   - `~/.dotcor/`
+   - `~/.dotcor/files/`
+3. Initialize Git repository in `~/.dotcor/files/`
 4. Create default `config.yaml`
-5. Success message
+5. Optionally create symlinks if config already exists (from clone)
+6. Success message
 
 **Command definition:**
 
 ```go
 var initCmd = &cobra.Command{
     Use:   "init",
-    Short: "Initialize DotCord repository",
-    Long:  `Creates ~/.dotcord directory structure and initializes Git repository.`,
+    Short: "Initialize DotCor repository",
+    Long:  `Creates ~/.dotcor directory structure and initializes Git repository.`,
     Run:   runInit,
 }
 
-func runInit(cmd *cobra.Command, args []string) {
-    // Implementation
+func init() {
+    initCmd.Flags().Bool("apply", false, "Create symlinks from existing config (for new machine setup)")
 }
 ```
 
 **Output example:**
 
 ```
-✓ Created ~/.dotcord/
-✓ Created ~/.dotcord/files/
-✓ Created ~/.dotcord/backups/
+✓ Created ~/.dotcor/
+✓ Created ~/.dotcor/files/
 ✓ Initialized Git repository
 ✓ Created config.yaml
 
-DotCord is ready! Next steps:
-  dotcord track ~/.zshrc
-  dotcord list
+DotCor is ready! Next steps:
+  dotcor add ~/.zshrc
+  dotcor list
+```
+
+**With `--apply` flag (new machine setup):**
+
+```
+$ dotcor init --apply
+
+✓ Found existing config
+✓ Creating symlinks...
+  ✓ ~/.zshrc → shell/zshrc
+  ✓ ~/.bashrc → shell/bashrc
+  ✓ ~/.config/nvim/init.vim → nvim/init.vim
+
+DotCor setup complete!
 ```
 
 **Error handling:**
 - Already initialized: friendly message, exit
 - Permission denied: clear error message
-- Git not installed: warning (can work without Git)
+- Git not installed: warning (can work without Git, just no auto-commits)
 
 ---
 
-#### 2.2 `dotcord track <file>` (`cmd/dotcord/track.go`)
+#### 2.2 `dotcor add <file>` (`cmd/dotcor/add.go`)
 
 **What it does:**
 1. Validate file exists and is readable
 2. Normalize source path (convert to ~ notation)
-3. Check if already tracked
-4. Generate repo path (e.g., `zsh/zshrc`)
-5. Copy file to `~/.dotcord/files/{repo_path}`
-6. Add to config.yaml
-7. Git commit (if enabled): "Track {source_path}"
-8. Success message
+3. Check if already managed
+4. Generate repo path
+5. Move file to `~/.dotcor/files/{repo_path}` (or copy directory)
+6. Create symlink from original location to repo
+7. Add to config.yaml
+8. Git commit: "Add {source_path}"
+9. Success message
 
 **Command definition:**
 
 ```go
-var trackCmd = &cobra.Command{
-    Use:   "track [file]",
-    Short: "Track a dotfile",
-    Args:  cobra.ExactArgs(1),
-    Run:   runTrack,
+var addCmd = &cobra.Command{
+    Use:   "add [file]...",
+    Short: "Add a dotfile or directory to DotCor",
+    Args:  cobra.MinimumNArgs(1),
+    Run:   runAdd,
 }
 ```
 
 **Output example:**
 
 ```
-✓ Tracking ~/.zshrc
-  Stored as: zsh/zshrc
-  Location: ~/.dotcord/files/zsh/zshrc
+$ dotcor add ~/.zshrc
+
+✓ Added ~/.zshrc
+  Moved to: ~/.dotcor/files/shell/zshrc
+  Symlink: ~/.zshrc → shell/zshrc
+✓ Committed to Git
+
+$ dotcor add ~/.config/nvim
+
+✓ Added ~/.config/nvim
+  Moved to: ~/.dotcor/files/nvim
+  Symlink: ~/.config/nvim → nvim
 ✓ Committed to Git
 ```
 
 **Error handling:**
 - File doesn't exist
 - File not readable
-- Already tracked (offer to update)
+- Already managed (offer to update)
 - Git commit fails (warn but don't fail)
+- Symlink fails on Windows (fall back to copy, show warning)
 
 ---
 
-#### 2.3 `dotcord list` (`cmd/dotcord/list.go`)
+#### 2.3 `dotcor list` (`cmd/dotcor/list.go`)
 
 **What it does:**
 1. Load config
-2. Display tracked files in table format
-3. Show count
+2. Display managed files in table format
+3. Show count and platform info
 
 **Command definition:**
 
 ```go
 var listCmd = &cobra.Command{
     Use:   "list",
-    Short: "List all tracked dotfiles",
+    Short: "List all managed dotfiles",
     Aliases: []string{"ls"},
     Run:   runList,
 }
@@ -384,35 +540,37 @@ var listCmd = &cobra.Command{
 **Output example:**
 
 ```
-Tracked dotfiles (3):
+Managed dotfiles (3):
 
-SOURCE PATH                     REPO PATH              TRACKED AT
-~/.zshrc                        zsh/zshrc              2025-01-04 10:30
-~/.config/nvim/init.vim         nvim/init.vim          2025-01-04 10:31
-~/.gitconfig                    git/gitconfig          2025-01-04 10:32
+SOURCE PATH                     REPO PATH              ADDED AT          PLATFORMS
+~/.zshrc                        shell/zshrc            Jan 04 10:30      all
+~/.config/nvim/init.vim         nvim/init.vim          Jan 04 10:31      all
+~/Library/Preferences/foo.plist foo.plist              Jan 04 10:32      darwin
 ```
 
 **Error handling:**
-- No tracked files: friendly message
-- Config not found: suggest running `dotcord init`
+- No managed files: friendly message
+- Config not found: suggest running `dotcor init`
 
 ---
 
-#### 2.4 `dotcord status` (`cmd/dotcord/status.go`)
+#### 2.4 `dotcor status` (`cmd/dotcor/status.go`)
 
 **What it does:**
 1. Load config
-2. For each tracked file:
-   - Compare repo version vs system version
-   - Detect: identical, modified, missing
-3. Display status for each file
+2. For each managed file:
+   - Check if symlink exists
+   - Check if symlink target exists
+   - Check if symlink points to correct location
+3. Show Git repository status
+4. Display status for each file + overall repo status
 
 **Command definition:**
 
 ```go
 var statusCmd = &cobra.Command{
     Use:   "status",
-    Short: "Show status of tracked dotfiles",
+    Short: "Show status of managed dotfiles and repository",
     Run:   runStatus,
 }
 ```
@@ -420,100 +578,76 @@ var statusCmd = &cobra.Command{
 **Output example:**
 
 ```
-Status:
+Symlinks:
+✓ ~/.zshrc                 → shell/zshrc
+✓ ~/.bashrc                → shell/bashrc
+✗ ~/.vimrc                 → vim/vimrc (broken: target missing)
+! ~/.config/nvim/init.vim  → (not linked - file exists but not a symlink)
 
-✓ ~/.zshrc                      Up to date
-✗ ~/.config/nvim/init.vim       Modified (system differs from repo)
-! ~/.gitconfig                  Missing from system
+Repository:
+● 2 uncommitted changes
+↑ 1 commit ahead of origin/main
+
+Run 'dotcor sync' to commit and push changes
 ```
 
 **Legend:**
-- ✓ = up to date
-- ✗ = modified
-- ! = missing
+- ✓ = symlink exists and target exists
+- ✗ = symlink broken (target missing or not pointing to repo)
+- ! = file exists at source location but not a symlink (conflict)
 
 ---
 
-#### 2.5 `dotcord apply` (`cmd/dotcord/apply.go`)
+#### 2.5 `dotcor remove <file>` (`cmd/dotcor/remove.go`)
 
 **What it does:**
-1. Load config
-2. For each tracked file:
-   - If system file doesn't exist: copy from repo
-   - If system file identical: skip
-   - If system file differs:
-     - Show diff
-     - Prompt: "Overwrite? [y/N/d=diff]"
-     - If yes: backup system file, copy from repo
-     - If no: skip
-3. Git commit (if any changes): "Apply dotfiles"
-4. Summary
+1. Validate file is managed
+2. Prompt: "Remove symlink? [y/N]"
+3. If yes: remove symlink
+4. Prompt: "Delete from repository? [y/N]"
+5. If yes: delete from `~/.dotcor/files/`
+6. Remove from config.yaml
+7. Git commit: "Remove {source_path}"
+8. Optionally restore file to original location (if not deleted from repo)
 
 **Command definition:**
 
 ```go
-var applyCmd = &cobra.Command{
-    Use:   "apply",
-    Short: "Apply dotfiles from repository to system",
-    Run:   runApply,
-}
-```
-
-**Output example:**
-
-```
-Applying dotfiles...
-
-✓ ~/.zshrc                      Already up to date
-? ~/.config/nvim/init.vim       System file differs
-
---- System
-+++ Repository
-@@ -1,3 +1,4 @@
- set number
-+set relativenumber
- syntax on
-
-Overwrite ~/.config/nvim/init.vim? [y/N/d]: y
-✓ Backed up to: ~/.dotcord/backups/2025-01-04_103500_init.vim
-✓ Applied from repository
-
-! ~/.gitconfig                  Missing from system
-✓ Copied from repository
-
-Summary: 2 applied, 1 skipped, 0 errors
-```
-
-**Flags:**
-- `--force` - Apply all without prompting
-- `--dry-run` - Show what would be applied
-
----
-
-#### 2.6 `dotcord untrack <file>` (`cmd/dotcord/untrack.go`)
-
-**What it does:**
-1. Validate file is tracked
-2. Remove from config.yaml
-3. Prompt: "Delete from repository? [y/N]"
-4. If yes: delete from `~/.dotcord/files/`
-5. Git commit: "Untrack {source_path}"
-
-**Command definition:**
-
-```go
-var untrackCmd = &cobra.Command{
-    Use:   "untrack [file]",
-    Short: "Stop tracking a dotfile",
+var removeCmd = &cobra.Command{
+    Use:   "remove [file]",
+    Short: "Stop managing a dotfile",
     Args:  cobra.ExactArgs(1),
-    Run:   runUntrack,
+    Run:   runRemove,
+}
+
+func init() {
+    removeCmd.Flags().Bool("keep-file", false, "Keep file at source location after removing symlink")
 }
 ```
 
 **Output example:**
 
 ```
-✓ Untracked ~/.zshrc
+$ dotcor remove ~/.zshrc
+
+? Remove symlink ~/.zshrc? [y/N]: y
+✓ Symlink removed
+
+? Delete from repository? [y/N]: n
+✓ File kept in repository at shell/zshrc
+✓ Copied back to ~/.zshrc
+
+✓ Removed from config
+✓ Committed to Git
+```
+
+**With `--keep-file` flag:**
+
+```
+$ dotcor remove ~/.zshrc --keep-file
+
+✓ Symlink removed
+✓ Copied back to ~/.zshrc
 ? Delete from repository? [y/N]: y
 ✓ Deleted from repository
 ✓ Committed to Git
@@ -521,62 +655,123 @@ var untrackCmd = &cobra.Command{
 
 ---
 
-#### 2.7 `dotcord push` (`cmd/dotcord/push.go`)
+#### 2.6 `dotcor sync` (`cmd/dotcor/sync.go`)
 
 **What it does:**
-1. Check if Git remote is configured
-2. Check for uncommitted changes, auto-commit if needed
-3. Git push to remote
+1. Check for deleted files (symlinks pointing to nowhere)
+2. Prompt to remove deleted files from config
+3. Commit all changes with message: "Sync dotfiles - {date}"
+4. Push to remote (if configured)
+5. Summary
+
+**Command definition:**
+
+```go
+var syncCmd = &cobra.Command{
+    Use:   "sync",
+    Short: "Commit all changes and push to remote",
+    Run:   runSync,
+}
+
+func init() {
+    syncCmd.Flags().Bool("no-push", false, "Commit but don't push to remote")
+}
+```
+
+**Output example:**
+
+```
+$ dotcor sync
+
+Checking for changes...
+✓ ~/.zshrc (modified)
+! ~/.tmux.conf (deleted from system)
+
+? ~/.tmux.conf was deleted. Remove from dotcor? [y/N]: y
+
+✓ Committed 2 changes: "Sync dotfiles - 2025-01-04 15:30"
+✓ Pushed to origin/main
+```
+
+**Error handling:**
+- No remote configured: show helpful message
+- Push fails: show Git error
+- Merge conflicts: tell user to resolve manually
+
+---
+
+#### 2.7 `dotcor restore <file>` (`cmd/dotcor/restore.go`)
+
+**What it does:**
+1. Validate file is managed
+2. Restore file from Git history (default: HEAD)
+3. Optionally restore from specific commit
 4. Success message
 
 **Command definition:**
 
 ```go
-var pushCmd = &cobra.Command{
-    Use:   "push",
-    Short: "Push dotfiles to Git remote",
-    Run:   runPush,
+var restoreCmd = &cobra.Command{
+    Use:   "restore [file]",
+    Short: "Restore a dotfile from Git history",
+    Args:  cobra.ExactArgs(1),
+    Run:   runRestore,
+}
+
+func init() {
+    restoreCmd.Flags().String("to", "HEAD", "Git reference to restore from (e.g., HEAD~5, abc123)")
 }
 ```
 
 **Output example:**
 
 ```
-✓ Committed local changes
-✓ Pushed to origin
-```
+$ dotcor restore ~/.zshrc
 
-**Error handling:**
-- No remote configured: show instructions
-- Push fails: show Git error
+✓ Restored ~/.zshrc from HEAD
+
+$ dotcor restore ~/.zshrc --to=HEAD~5
+
+✓ Restored ~/.zshrc from HEAD~5 (5 commits ago)
+```
 
 ---
 
-#### 2.8 `dotcord pull` (`cmd/dotcord/pull.go`)
+#### 2.8 `dotcor history <file>` (`cmd/dotcor/history.go`)
 
 **What it does:**
-1. Check if Git remote is configured
-2. Git pull from remote
-3. Prompt: "Apply pulled changes? [y/N]"
-4. If yes: run `dotcord apply`
+1. Validate file is managed
+2. Show Git log for that file
+3. Display in readable format
 
 **Command definition:**
 
 ```go
-var pullCmd = &cobra.Command{
-    Use:   "pull",
-    Short: "Pull dotfiles from Git remote",
-    Run:   runPull,
+var historyCmd = &cobra.Command{
+    Use:   "history [file]",
+    Short: "Show Git history for a dotfile",
+    Args:  cobra.ExactArgs(1),
+    Run:   runHistory,
+}
+
+func init() {
+    historyCmd.Flags().Int("n", 10, "Number of commits to show")
 }
 ```
 
 **Output example:**
 
 ```
-✓ Pulled from origin
-? Apply changes to system? [y/N]: y
+$ dotcor history ~/.zshrc
 
-[... runs dotcord apply ...]
+History for ~/.zshrc (shell/zshrc):
+
+abc123f - 2025-01-04 15:30 - Update zsh aliases
+def456a - 2025-01-03 09:15 - Add new PATH entries
+789beef - 2025-01-02 14:22 - Sync dotfiles
+...
+
+Use 'dotcor restore ~/.zshrc --to=<commit>' to restore
 ```
 
 ---
@@ -587,42 +782,58 @@ var pullCmd = &cobra.Command{
 
 ```bash
 # Initialize
-dotcord init
+dotcor init
 
-# Track some files
-dotcord track ~/.zshrc
-dotcord track ~/.gitconfig
-dotcord list
+# Add some files
+dotcor add ~/.zshrc ~/.bashrc
+dotcor add ~/.config/nvim
+dotcor list
 
-# Modify a system file
-echo "# test" >> ~/.zshrc
-dotcord status
+# Verify symlinks created
+ls -la ~/.zshrc  # Should show: .zshrc -> /Users/you/.dotcor/files/shell/zshrc
 
-# Apply from repo (should show diff and prompt)
-dotcord apply
+# Edit a file (changes immediately reflected in repo)
+echo "alias test='echo test'" >> ~/.zshrc
 
-# Test on "new machine" (simulate by moving files)
-mv ~/.zshrc ~/.zshrc.bak
-dotcord apply
+# Check status
+dotcor status  # Should show uncommitted changes
+
+# Sync changes
+dotcor sync
+
+# Test restore
+dotcor history ~/.zshrc
+dotcor restore ~/.zshrc --to=HEAD~1
+
+# Test on "new machine" (simulate)
+dotcor remove ~/.zshrc --keep-file
+rm ~/.zshrc
+dotcor add ~/.zshrc  # Should create symlink
 ```
 
 #### 3.2 Edge Cases to Test
 
-- Track non-existent file (should error)
-- Track already-tracked file (should prompt to update)
-- Apply when system file is newer (should prompt)
-- Apply when no tracked files (friendly message)
-- Untrack non-tracked file (should error)
+- Add non-existent file (should error)
+- Add already-managed file (should prompt to update)
+- Add directory vs single file
+- Remove file that's not managed (should error)
 - Init when already initialized (should warn)
 - Operations without Git installed (should work, skip Git)
+- Symlink on Windows without dev mode (should fall back to copy)
+- Platform-specific files (only link on correct platform)
+- Sync when no changes (should skip)
+- Sync when no remote configured (should warn)
 
 #### 3.3 Polish Items
 
 - Consistent error messages
 - Help text for all commands
-- Color output (consider using a color library)
+- Color output using a library like fatih/color or charmbracelet/lipgloss
 - Progress indicators for long operations
 - Validate Git is installed (warn if not)
+- Shell completion (Cobra supports this)
+- Man page generation
+- Version command
 
 ---
 
@@ -630,40 +841,56 @@ dotcord apply
 
 **Infrastructure (build first):**
 - [ ] `internal/config/config.go` - Config structs and Viper integration
-- [ ] `internal/config/paths.go` - Path normalization
-- [ ] `internal/fs/fs.go` - File operations
-- [ ] `internal/fs/validate.go` - Validation
+- [ ] `internal/config/paths.go` - Path normalization and repo path generation
+- [ ] `internal/fs/symlink.go` - Cross-platform symlink handling
+- [ ] `internal/fs/fs.go` - File operations (move, copy, etc.)
+- [ ] `internal/core/validator.go` - Validation logic
 - [ ] `internal/git/git.go` - Git wrapper
 
 **Commands (build in order):**
-- [ ] `cmd/dotcord/main.go` - Cobra setup
-- [ ] `cmd/dotcord/init.go` - Initialize DotCord
-- [ ] `cmd/dotcord/track.go` - Track files
-- [ ] `cmd/dotcord/list.go` - List tracked files
-- [ ] `cmd/dotcord/status.go` - Show status
-- [ ] `cmd/dotcord/apply.go` - Apply dotfiles
-- [ ] `cmd/dotcord/untrack.go` - Untrack files
-- [ ] `cmd/dotcord/push.go` - Git push
-- [ ] `cmd/dotcord/pull.go` - Git pull
+- [ ] `cmd/dotcor/main.go` - Cobra setup
+- [ ] `cmd/dotcor/init.go` - Initialize DotCor
+- [ ] `cmd/dotcor/add.go` - Add files/directories
+- [ ] `cmd/dotcor/list.go` - List managed files
+- [ ] `cmd/dotcor/status.go` - Show status
+- [ ] `cmd/dotcor/remove.go` - Remove files
+- [ ] `cmd/dotcor/sync.go` - Sync changes
+- [ ] `cmd/dotcor/restore.go` - Restore from history
+- [ ] `cmd/dotcor/history.go` - Show Git history
 
 **Testing:**
 - [ ] Manual end-to-end test flow
 - [ ] Edge case testing
+- [ ] Cross-platform testing (macOS, Linux, Windows)
 - [ ] Polish and error messages
 
 ---
 
 ## Future Enhancements (Post-MVP)
 
-- Unit tests for core packages
-- Integration tests
-- CI/CD with GitHub Actions
-- Homebrew formula
-- Binary releases with `goreleaser`
-- Symlink mode (alternative to copy)
-- Profile support (work, home, server)
-- Template variables
-- Encrypted secrets support
+### v1.0 - MVP (Current)
+- Core symlink-based management
+- Git auto-commit
+- Cross-platform support
+- Basic restore/history
+
+### v2.0 - Enhanced Workflow
+- Watch mode: `dotcor watch` to auto-sync on file changes
+- Template support: basic variable substitution `{{ .hostname }}`
+- Hooks: run commands before/after operations
+- Batch operations: `dotcor add ~/.config/*`
+
+### v3.0 - Power Features
+- Machine profiles (work, home, server)
+- Encrypted secrets integration (age, gpg)
+- Package manager integration (export Brewfile, apt list, etc.)
+- TUI interface (using charmbracelet/bubbletea)
+
+### v4.0 - Advanced
+- Desktop GUI (Tauri or Wails)
+- Plugin system
+- Cloud sync (beyond Git)
+- Migration tools (from chezmoi, stow, etc.)
 
 ---
 
@@ -672,3 +899,5 @@ dotcord apply
 - [Cobra Documentation](https://github.com/spf13/cobra)
 - [Viper Documentation](https://github.com/spf13/viper)
 - [Go YAML v3](https://github.com/go-yaml/yaml)
+- [GNU Stow](https://www.gnu.org/software/stow/)
+- [Go filepath package](https://pkg.go.dev/path/filepath) - Cross-platform path handling

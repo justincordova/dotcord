@@ -1,19 +1,19 @@
-# DotCord
+# DotCor
 
-A simple, safe, and powerful dotfile manager built in Go.
+A simple, fast dotfile manager built in Go with symlinks and Git automation.
 
-DotCord helps you track, backup, and sync your dotfiles across machines with Git integration and a focus on safety.
+DotCor combines the simplicity of GNU Stow with the convenience of automatic Git commits, making it easy to manage your dotfiles across machines.
 
 ---
 
 ## Features
 
+- **Symlink-based** - Edit files directly, changes instantly appear in your repository
+- **Zero-config** - Automatic path organization with sensible defaults
+- **Git automation** - Auto-commits after every operation, manual Git usage optional
+- **Cross-platform** - Works on macOS, Linux, and Windows
 - **Simple CLI** - Easy-to-use commands for everyday dotfile management
-- **Git Integration** - Automatic commits and optional remote sync
-- **Safety First** - Always backs up before overwriting files
-- **Cross-Platform** - Works on macOS, Linux, and Windows
-- **Portable** - Path normalization works across different users and machines
-- **No Surprises** - Shows diffs and prompts before making changes
+- **Git history** - Built-in restore and history commands leveraging Git
 
 ---
 
@@ -23,42 +23,45 @@ DotCord helps you track, backup, and sync your dotfiles across machines with Git
 
 ```bash
 # Clone the repository
-git clone https://github.com/justincordova/dotcord.git
-cd dotcord
+git clone https://github.com/justincordova/dotcor.git
+cd dotcor
 
 # Build and install
-go build -o dotcord cmd/dotcord/main.go
-sudo mv dotcord /usr/local/bin/
+go build -o dotcor cmd/dotcor/main.go
+sudo mv dotcor /usr/local/bin/
 
 # Or just run directly
-go run cmd/dotcord/main.go
+go run cmd/dotcor/main.go
 ```
 
 ### Basic Usage
 
 ```bash
-# Initialize DotCord
-dotcord init
+# Initialize DotCor
+dotcor init
 
-# Track your dotfiles
-dotcord track ~/.zshrc
-dotcord track ~/.gitconfig
-dotcord track ~/.config/nvim/init.vim
+# Add your dotfiles (moves file to repo, creates symlink)
+dotcor add ~/.zshrc
+dotcor add ~/.gitconfig
+dotcor add ~/.config/nvim
 
-# List tracked files
-dotcord list
+# List managed files
+dotcor list
 
-# Check status (what's different between repo and system)
-dotcord status
+# Check status
+dotcor status
 
-# Apply dotfiles from repository to system
-dotcord apply
+# Edit your dotfiles as usual (changes are immediately in the repo)
+vim ~/.zshrc
 
-# Push to remote Git repository
-dotcord push
+# Commit and push all changes
+dotcor sync
 
-# Pull from remote and apply
-dotcord pull
+# View history
+dotcor history ~/.zshrc
+
+# Restore from history
+dotcor restore ~/.zshrc --to=HEAD~5
 ```
 
 ---
@@ -67,222 +70,219 @@ dotcord pull
 
 ### Storage Model
 
-DotCord uses a **copy-based** approach:
+DotCor uses **symlinks** to keep your actual dotfiles in a Git repository while making them accessible in their original locations:
 
-1. **Track** - Copies your dotfile to `~/.dotcord/files/`
-2. **Repository** - Stores dotfiles in a Git repository
-3. **Apply** - Copies dotfiles from repository back to system locations
+1. **Add** - Moves your dotfile to `~/.dotcor/files/` and creates a symlink
+2. **Edit** - You edit the file normally, changes are instantly in the repository
+3. **Sync** - Commits all changes and pushes to remote
 
 ```
-~/.zshrc  ──track──>  ~/.dotcord/files/zsh/zshrc  ──apply──>  ~/.zshrc
-                             (Git repo)
+~/.zshrc (symlink) ──points to──> ~/.dotcor/files/shell/zshrc (actual file)
+                                          ↓
+                                      Git repository
 ```
 
 ### Directory Structure
 
 ```
-~/.dotcord/
-├── config.yaml          # Metadata: which files are tracked
-├── files/               # Git repository storing your dotfiles
-│   ├── .git/
-│   ├── zsh/
-│   │   └── zshrc
-│   └── nvim/
-│       └── init.vim
-└── backups/             # Timestamped backups before overwrites
-    └── 2025-01-04_103000_zshrc
+~/.dotcor/
+├── config.yaml          # Metadata: which files are managed
+└── files/               # Git repository with your actual dotfiles
+    ├── .git/
+    ├── shell/
+    │   ├── zshrc        ← actual file
+    │   └── bashrc       ← actual file
+    └── nvim/
+        └── init.vim     ← actual file
+
+# Your home directory (symlinks):
+~/.zshrc                 → symlink to ~/.dotcor/files/shell/zshrc
+~/.bashrc                → symlink to ~/.dotcor/files/shell/bashrc
+~/.config/nvim/init.vim  → symlink to ~/.dotcor/files/nvim/init.vim
 ```
 
-### Safety Features
+### Workflow Benefits
 
-- **Always backs up** before overwriting system files
-- **Shows diffs** before applying changes
-- **Requires confirmation** for destructive operations
-- **Never silently modifies** your files
-- **Timestamped backups** stored in `~/.dotcord/backups/`
+**Traditional copy-based tools:**
+```bash
+vim ~/.zshrc              # Edit file
+dotcor track ~/.zshrc    # Remember to update repo (often forgotten!)
+dotcor push              # Push changes
+```
+
+**DotCor with symlinks:**
+```bash
+vim ~/.zshrc              # Edit file (changes instantly in repo)
+dotcor sync              # Commit and push (when ready)
+```
 
 ---
 
 ## Commands
 
-### `dotcord init`
+### `dotcor init`
 
-Initialize DotCord repository.
+Initialize DotCor repository.
 
 ```bash
-dotcord init
+dotcor init
 ```
 
 Creates:
-- `~/.dotcord/` directory structure
-- Git repository in `~/.dotcord/files/`
+- `~/.dotcor/` directory structure
+- Git repository in `~/.dotcor/files/`
 - Default configuration file
+
+**For new machine setup:**
+```bash
+# Clone your dotfiles first
+git clone https://github.com/you/dotfiles ~/.dotcor/files
+
+# Then initialize with --apply to create all symlinks
+dotcor init --apply
+```
 
 ---
 
-### `dotcord track <file>`
+### `dotcor add <file>`
 
-Track a dotfile.
+Add a dotfile or directory to DotCor.
 
 ```bash
-dotcord track ~/.zshrc
-dotcord track ~/.config/nvim/init.vim
+dotcor add ~/.zshrc
+dotcor add ~/.config/nvim
+dotcor add ~/.gitconfig ~/.bashrc  # Multiple files at once
 ```
 
 What it does:
-1. Validates file exists
-2. Copies to `~/.dotcord/files/`
+1. Moves file to `~/.dotcor/files/`
+2. Creates symlink at original location
 3. Records in `config.yaml`
 4. Git commits automatically
 
 ---
 
-### `dotcord list`
+### `dotcor list`
 
-List all tracked dotfiles.
+List all managed dotfiles.
 
 ```bash
-dotcord list
+dotcor list
 ```
 
 Output:
 ```
-Tracked dotfiles (3):
+Managed dotfiles (3):
 
-SOURCE PATH                     REPO PATH              TRACKED AT
-~/.zshrc                        zsh/zshrc              2025-01-04 10:30
-~/.config/nvim/init.vim         nvim/init.vim          2025-01-04 10:31
-~/.gitconfig                    git/gitconfig          2025-01-04 10:32
+SOURCE PATH                     REPO PATH              ADDED AT          PLATFORMS
+~/.zshrc                        shell/zshrc            Jan 04 10:30      all
+~/.config/nvim/init.vim         nvim/init.vim          Jan 04 10:31      all
+~/.gitconfig                    git/gitconfig          Jan 04 10:32      all
 ```
 
 ---
 
-### `dotcord status`
+### `dotcor status`
 
-Show status of tracked dotfiles.
-
-```bash
-dotcord status
-```
-
-Compares repository version with system version:
-
-```
-Status:
-
-✓ ~/.zshrc                      Up to date
-✗ ~/.config/nvim/init.vim       Modified (system differs)
-! ~/.gitconfig                  Missing from system
-```
-
----
-
-### `dotcord apply`
-
-Apply dotfiles from repository to system.
+Show status of managed dotfiles and repository.
 
 ```bash
-dotcord apply
+dotcor status
 ```
 
-What it does:
-1. Compares each tracked file
-2. Shows diff if different
-3. Prompts for confirmation
-4. Backs up existing file
-5. Copies from repository
-
-**Flags:**
-- `--force` - Apply without prompting
-- `--dry-run` - Show what would be applied
+Shows:
+- Symlink health (working, broken, conflicts)
+- Git repository status (uncommitted changes, ahead/behind)
 
 Example output:
 ```
-Applying dotfiles...
+Symlinks:
+✓ ~/.zshrc                 → shell/zshrc
+✓ ~/.bashrc                → shell/bashrc
+✗ ~/.vimrc                 → vim/vimrc (broken: target missing)
 
-✓ ~/.zshrc                      Already up to date
+Repository:
+● 2 uncommitted changes
+↑ 1 commit ahead of origin/main
 
-? ~/.config/nvim/init.vim       System file differs
-
---- System
-+++ Repository
-@@ -1,3 +1,4 @@
- set number
-+set relativenumber
- syntax on
-
-Overwrite ~/.config/nvim/init.vim? [y/N/d]: y
-✓ Backed up to: ~/.dotcord/backups/2025-01-04_103500_init.vim
-✓ Applied from repository
-
-Summary: 1 applied, 1 skipped
+Run 'dotcor sync' to commit and push changes
 ```
 
 ---
 
-### `dotcord untrack <file>`
+### `dotcor sync`
 
-Stop tracking a dotfile.
+Commit all changes and push to remote.
 
 ```bash
-dotcord untrack ~/.zshrc
+dotcor sync
 ```
 
 What it does:
-1. Removes from `config.yaml`
-2. Prompts to delete from repository
-3. Git commits automatically
+1. Detects changed files
+2. Prompts to remove deleted files from config
+3. Commits with message: "Sync dotfiles - {date}"
+4. Pushes to remote (if configured)
+
+**Flags:**
+- `--no-push` - Commit but don't push to remote
 
 ---
 
-### `dotcord push`
+### `dotcor remove <file>`
 
-Push dotfiles to Git remote.
+Stop managing a dotfile.
 
 ```bash
-dotcord push
+dotcor remove ~/.zshrc
 ```
 
-Requires Git remote to be configured:
+Interactive prompts:
+1. Remove symlink? (y/N)
+2. Delete from repository? (y/N)
+3. Automatically copies file back if keeping it
+
+**Flags:**
+- `--keep-file` - Keep file at source location after removing symlink
+
+---
+
+### `dotcor restore <file>`
+
+Restore a dotfile from Git history.
+
 ```bash
-cd ~/.dotcord/files
-git remote add origin git@github.com:yourusername/dotfiles.git
+# Restore from latest commit (undo local edits)
+dotcor restore ~/.zshrc
+
+# Restore from specific commit
+dotcor restore ~/.zshrc --to=HEAD~5
+dotcor restore ~/.zshrc --to=abc123f
 ```
 
 ---
 
-### `dotcord pull`
+### `dotcor history <file>`
 
-Pull dotfiles from Git remote.
+Show Git history for a dotfile.
 
 ```bash
-dotcord pull
+dotcor history ~/.zshrc
 ```
 
-What it does:
-1. Pulls from remote repository
-2. Prompts to apply changes
-3. Runs `dotcord apply` if confirmed
+Output:
+```
+History for ~/.zshrc (shell/zshrc):
 
----
+abc123f - 2025-01-04 15:30 - Update zsh aliases
+def456a - 2025-01-03 09:15 - Add new PATH entries
+789beef - 2025-01-02 14:22 - Sync dotfiles
 
-## Configuration
-
-Configuration is stored in `~/.dotcord/config.yaml`:
-
-```yaml
-repo_path: /Users/you/.dotcord
-backup_path: /Users/you/.dotcord/backups
-git_enabled: true
-git_remote: ""
-
-tracked_files:
-  - source_path: ~/.zshrc
-    repo_path: zsh/zshrc
-    tracked_at: 2025-01-04T10:30:00Z
+Use 'dotcor restore ~/.zshrc --to=<commit>' to restore
 ```
 
-You can manually edit this file if needed.
+**Flags:**
+- `-n <number>` - Number of commits to show (default: 10)
 
 ---
 
@@ -290,83 +290,191 @@ You can manually edit this file if needed.
 
 ### New Machine Setup
 
-On your main machine:
+**On your main machine:**
 ```bash
-dotcord init
-dotcord track ~/.zshrc
-dotcord track ~/.gitconfig
-cd ~/.dotcord/files
+dotcor init
+dotcor add ~/.zshrc ~/.gitconfig ~/.config/nvim
+cd ~/.dotcor/files
 git remote add origin git@github.com:you/dotfiles.git
-dotcord push
+dotcor sync
 ```
 
-On a new machine:
+**On a new machine:**
 ```bash
-# Install DotCord
-dotcord init
-cd ~/.dotcord/files
-git remote add origin git@github.com:you/dotfiles.git
-dotcord pull
-# Prompts to apply → your dotfiles are restored!
+# Install DotCor, then:
+git clone git@github.com:you/dotfiles.git ~/.dotcor/files
+dotcor init --apply
+# All your dotfiles are now symlinked and ready!
 ```
 
 ---
 
 ### Daily Workflow
 
-Edit your dotfiles as usual. When you want to update your repository:
+Edit your dotfiles as usual:
 
 ```bash
-dotcord status          # See what changed
-dotcord track ~/.zshrc  # Update tracked file in repo
-dotcord push            # Sync to remote
+vim ~/.zshrc              # Add new aliases
+vim ~/.gitconfig          # Update Git settings
+vim ~/.config/nvim/init.vim
 ```
 
-Apply changes on another machine:
+When you want to save your changes:
 
 ```bash
-dotcord pull            # Pull and apply
+dotcor status            # See what changed
+dotcor sync              # Commit and push
 ```
 
----
-
-### Recover from Mistakes
-
-DotCord backs up every file before overwriting:
+On another machine:
 
 ```bash
-# Oops, applied the wrong version
-ls ~/.dotcord/backups/
-# 2025-01-04_103500_zshrc
-
-# Restore from backup
-cp ~/.dotcord/backups/2025-01-04_103500_zshrc ~/.zshrc
+cd ~/.dotcor/files
+git pull                  # Changes are immediately active via symlinks!
 ```
 
 ---
 
-## Why DotCord?
+### Undo Mistakes
+
+Made a bad change? Easy to undo:
+
+```bash
+# View history
+dotcor history ~/.zshrc
+
+# Restore previous version
+dotcor restore ~/.zshrc --to=HEAD~1
+
+# Or use Git directly
+cd ~/.dotcor/files
+git log shell/zshrc
+git checkout HEAD~5 -- shell/zshrc
+```
+
+---
+
+## Configuration
+
+Configuration is stored in `~/.dotcor/config.yaml`:
+
+```yaml
+repo_path: ~/.dotcor/files
+git_enabled: true
+git_remote: ""
+
+managed_files:
+  - source_path: ~/.zshrc
+    repo_path: shell/zshrc
+    added_at: 2025-01-04T10:30:00Z
+    platforms: []  # Empty = all platforms
+
+  - source_path: ~/Library/Preferences/foo.plist
+    repo_path: foo.plist
+    added_at: 2025-01-04T10:31:00Z
+    platforms: ["darwin"]  # macOS only
+```
+
+### Platform-Specific Files
+
+You can specify which platforms a file should be managed on:
+
+- `[]` or empty - All platforms (default)
+- `["darwin"]` - macOS only
+- `["linux"]` - Linux only
+- `["windows"]` - Windows only
+- `["darwin", "linux"]` - macOS and Linux
+
+When you run `dotcor init --apply` on a new machine, only files for that platform will be symlinked.
+
+---
+
+## Advanced Usage
+
+### Manual Git Operations
+
+DotCor auto-commits for convenience, but you can always use Git directly:
+
+```bash
+cd ~/.dotcor/files
+
+# View detailed history
+git log --oneline --graph
+
+# Create branches
+git checkout -b experimental
+
+# Cherry-pick changes
+git cherry-pick abc123f
+
+# Advanced operations
+git rebase -i HEAD~10
+```
+
+### Setting Up Remote
+
+```bash
+cd ~/.dotcor/files
+git remote add origin git@github.com:you/dotfiles.git
+git branch -M main
+git push -u origin main
+```
+
+Now `dotcor sync` will automatically push to your remote.
+
+---
+
+## Cross-Platform Support
+
+### macOS & Linux
+
+Full symlink support out of the box. No configuration needed.
+
+### Windows
+
+**Symlink support:** Requires Windows 10+ with Developer Mode enabled or Administrator privileges.
+
+**If symlinks fail:** DotCor automatically falls back to copying files with a warning:
+
+```
+⚠ Symlink failed, copying file instead
+  Enable Developer Mode for symlink support
+```
+
+**To enable Developer Mode:**
+1. Settings → Update & Security → For developers
+2. Enable "Developer Mode"
+3. Restart terminal
+
+---
+
+## Why DotCor?
 
 ### vs. Manual Git Repository
 
-- **DotCord:** Automatic backups, conflict detection, path normalization
-- **Manual:** You handle everything yourself
+- **DotCor:** Symlinks make edits instant, auto-commits, path organization
+- **Manual:** You handle everything yourself, easy to forget to commit
 
 ### vs. GNU Stow
 
-- **DotCord:** Copy-based, Git integration, works everywhere
-- **Stow:** Symlink-based, requires specific directory structure
+- **DotCor:** Git auto-commits, cross-platform, convenience commands
+- **Stow:** Minimal, Unix-only, requires manual Git management
 
 ### vs. Chezmoi
 
-- **DotCord:** Simple, minimal, focused on core features
-- **Chezmoi:** Feature-rich, templates, more complexity
+- **DotCor:** Simple, minimal learning curve, standard Git workflow
+- **Chezmoi:** Feature-rich with templates, secrets, more complexity
 
-DotCord is for users who want:
-- Simple dotfile management without learning a complex tool
-- Git integration without manual commits
-- Safety features (backups, diffs, prompts)
+### vs. yadm
+
+- **DotCor:** Explicit file management, organized repo structure
+- **yadm:** Entire home directory as Git repo, less organized
+
+**DotCor is for users who want:**
+- GNU Stow's simplicity with Git automation built-in
+- To edit dotfiles directly without manual sync commands
 - A tool that stays out of your way
+- Simple cross-platform dotfile management
 
 ---
 
@@ -375,13 +483,29 @@ DotCord is for users who want:
 ### Project Structure
 
 ```
-dotcord/
-├── cmd/dotcord/          # CLI commands (Cobra)
+dotcor/
+├── cmd/dotcor/          # CLI commands (Cobra)
+│   ├── main.go
+│   ├── init.go
+│   ├── add.go
+│   ├── remove.go
+│   ├── list.go
+│   ├── status.go
+│   ├── sync.go
+│   ├── restore.go
+│   └── history.go
 ├── internal/
 │   ├── config/          # Configuration management
+│   │   ├── config.go
+│   │   └── paths.go
 │   ├── core/            # Business logic
+│   │   ├── linker.go
+│   │   └── validator.go
 │   ├── fs/              # File operations
+│   │   ├── fs.go
+│   │   └── symlink.go
 │   └── git/             # Git integration
+│       └── git.go
 ├── PLAN.md              # Implementation plan
 └── README.md            # This file
 ```
@@ -389,13 +513,13 @@ dotcord/
 ### Building
 
 ```bash
-go build -o dotcord cmd/dotcord/main.go
+go build -o dotcor cmd/dotcor/main.go
 ```
 
 ### Running
 
 ```bash
-go run cmd/dotcord/main.go [command]
+go run cmd/dotcor/main.go [command]
 ```
 
 ### Contributing
@@ -407,26 +531,28 @@ See `PLAN.md` for implementation details and development roadmap.
 ## Roadmap
 
 ### v1.0 (Current - MVP)
-- Core CLI commands
-- Git integration
-- Safety features (backups, diffs, prompts)
-- Path normalization
+- Core symlink-based management
+- Git auto-commit and sync
+- Cross-platform support (macOS, Linux, Windows)
+- Basic restore/history commands
 
 ### v2.0 (Future)
-- Profile system (work, home, server)
-- OS-specific overrides
-- Template variables
-- Local HTTP API
+- Watch mode: auto-sync on file changes
+- Template support: basic variable substitution
+- Hooks: run commands before/after operations
+- Batch operations
 
 ### v3.0 (Future)
-- Secrets manager with encryption
-- System package export (Homebrew, npm, etc.)
-- Advanced templating
+- Machine profiles (work, home, server)
+- Encrypted secrets integration
+- Package manager integration (Brewfile, etc.)
+- TUI interface
 
 ### v4.0 (Future)
-- Desktop GUI (Flutter)
+- Desktop GUI
 - Plugin system
-- Background sync daemon
+- Cloud sync options
+- Migration tools from other dotfile managers
 
 ---
 
@@ -444,5 +570,5 @@ Built by Justin Cordova
 
 ## Support
 
-- **Issues:** https://github.com/justincordova/dotcord/issues
-- **Discussions:** https://github.com/justincordova/dotcord/discussions
+- **Issues:** https://github.com/justincordova/dotcor/issues
+- **Discussions:** https://github.com/justincordova/dotcor/discussions
