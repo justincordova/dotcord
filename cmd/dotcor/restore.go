@@ -1,25 +1,260 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/justincordova/dotcor/internal/config"
+	"github.com/justincordova/dotcor/internal/core"
+	"github.com/justincordova/dotcor/internal/git"
 	"github.com/spf13/cobra"
 )
 
 var restoreCmd = &cobra.Command{
 	Use:   "restore [file]",
-	Short: "Restore a dotfile from Git history",
-	Args:  cobra.ExactArgs(1),
-	Run:   runRestore,
+	Short: "Restore a dotfile from Git history or backup",
+	Long: `Restore a dotfile from Git history or from a backup.
+
+By default, restores from the most recent Git commit. Use --to to specify
+a different commit or reference. Use --from-backup to restore from a backup.
+
+Examples:
+  dotcor restore ~/.zshrc                # Restore from latest commit
+  dotcor restore ~/.zshrc --to HEAD~1    # Restore from previous commit
+  dotcor restore ~/.zshrc --to abc123    # Restore from specific commit
+  dotcor restore ~/.zshrc --from-backup  # Restore from backup
+  dotcor restore --list-backups          # List available backups`,
+	RunE: runRestore,
 }
 
 func init() {
-	restoreCmd.Flags().String("to", "HEAD", "Git reference to restore from (e.g., HEAD~5, abc123)")
+	restoreCmd.Flags().String("to", "HEAD", "Git reference to restore from (e.g., HEAD~1, abc123)")
+	restoreCmd.Flags().Bool("from-backup", false, "Restore from backup instead of Git history")
+	restoreCmd.Flags().Bool("list-backups", false, "List available backups")
+	restoreCmd.Flags().Bool("preview", false, "Show what would be restored without making changes")
+	restoreCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompts")
 	rootCmd.AddCommand(restoreCmd)
 }
 
-func runRestore(cmd *cobra.Command, args []string) {
-	// TODO: Implement
-	// 1. Validate file is managed
-	// 2. Get --to flag value
-	// 3. Restore file from Git history
-	// 4. Display success message
+func runRestore(cmd *cobra.Command, args []string) error {
+	toRef, _ := cmd.Flags().GetString("to")
+	fromBackup, _ := cmd.Flags().GetBool("from-backup")
+	listBackups, _ := cmd.Flags().GetBool("list-backups")
+	preview, _ := cmd.Flags().GetBool("preview")
+	force, _ := cmd.Flags().GetBool("force")
+
+	// Load config
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w\nRun 'dotcor init' first", err)
+	}
+
+	// Handle --list-backups
+	if listBackups {
+		return listAllBackups()
+	}
+
+	// Require file argument
+	if len(args) == 0 {
+		return fmt.Errorf("specify a file to restore")
+	}
+
+	sourcePath := args[0]
+
+	// Get managed file info
+	mf, err := cfg.GetManagedFile(sourcePath)
+	if err != nil {
+		return fmt.Errorf("file not managed: %s", sourcePath)
+	}
+
+	// Get repo path
+	repoPath, err := config.GetRepoFilePath(cfg, mf.RepoPath)
+	if err != nil {
+		return fmt.Errorf("getting repo path: %w", err)
+	}
+
+	repoRoot, err := config.ExpandPath(cfg.RepoPath)
+	if err != nil {
+		return fmt.Errorf("expanding repo root: %w", err)
+	}
+
+	// Handle backup restore
+	if fromBackup {
+		return restoreFromBackup(mf.SourcePath, repoPath, preview, force)
+	}
+
+	// Git restore
+	return restoreFromGit(repoRoot, mf.RepoPath, repoPath, toRef, preview, force)
+}
+
+// restoreFromGit restores a file from Git history
+func restoreFromGit(repoRoot, repoPath, fullRepoPath, ref string, preview, force bool) error {
+	// Check if git is available
+	if !git.IsGitInstalled() {
+		return fmt.Errorf("git is not installed")
+	}
+
+	// Check if it's a git repo
+	if !git.IsRepo(repoRoot) {
+		return fmt.Errorf("repository is not a git repository")
+	}
+
+	// Show preview of what will be restored
+	if preview {
+		fmt.Printf("Would restore %s from %s\n", repoPath, ref)
+
+		// Show the commit info
+		commits, err := git.GetFileHistory(repoRoot, repoPath, 1)
+		if err == nil && len(commits) > 0 {
+			fmt.Printf("\nCurrent version:\n")
+			fmt.Printf("  %s %s - %s\n", commits[0].Hash[:7], commits[0].Date.Format("2006-01-02"), commits[0].Message)
+		}
+
+		return nil
+	}
+
+	// Confirmation
+	if !force {
+		fmt.Printf("Restore %s from %s?\n", repoPath, ref)
+		fmt.Println("This will overwrite the current version.")
+		fmt.Println("")
+
+		if !confirmRestore() {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	// Acquire lock
+	if err := core.AcquireLock(); err != nil {
+		return fmt.Errorf("acquiring lock: %w", err)
+	}
+	defer core.ReleaseLock()
+
+	// Create backup of current version
+	backupPath, err := core.CreateBackup(fullRepoPath)
+	if err != nil {
+		fmt.Printf("⚠ Could not create backup: %v\n", err)
+	} else {
+		fmt.Printf("✓ Backed up current version to %s\n", backupPath)
+	}
+
+	// Restore from Git
+	if err := git.RestoreFile(repoRoot, repoPath, ref); err != nil {
+		return fmt.Errorf("restoring from git: %w", err)
+	}
+
+	fmt.Printf("✓ Restored %s from %s\n", repoPath, ref)
+	return nil
+}
+
+// restoreFromBackup restores a file from backup
+func restoreFromBackup(sourcePath, repoPath string, preview, force bool) error {
+	// Get filename for backup lookup
+	filename := getFilename(sourcePath)
+
+	// Find backups
+	backups, err := core.GetBackupsForFile(filename)
+	if err != nil {
+		return fmt.Errorf("finding backups: %w", err)
+	}
+
+	if len(backups) == 0 {
+		return fmt.Errorf("no backups found for %s", sourcePath)
+	}
+
+	// Use most recent backup
+	backup := backups[0]
+
+	if preview {
+		fmt.Printf("Would restore %s from backup:\n", sourcePath)
+		fmt.Printf("  %s (%s)\n", backup.BackupPath, backup.Timestamp.Format("2006-01-02 15:04:05"))
+		return nil
+	}
+
+	// Confirmation
+	if !force {
+		fmt.Printf("Restore %s from backup?\n", sourcePath)
+		fmt.Printf("Backup: %s (%s)\n", backup.BackupPath, backup.Timestamp.Format("2006-01-02 15:04:05"))
+		fmt.Println("")
+
+		if !confirmRestore() {
+			fmt.Println("Cancelled.")
+			return nil
+		}
+	}
+
+	// Acquire lock
+	if err := core.AcquireLock(); err != nil {
+		return fmt.Errorf("acquiring lock: %w", err)
+	}
+	defer core.ReleaseLock()
+
+	// Restore from backup
+	if err := core.RestoreBackup(backup.BackupPath, repoPath); err != nil {
+		return fmt.Errorf("restoring from backup: %w", err)
+	}
+
+	fmt.Printf("✓ Restored %s from backup\n", sourcePath)
+	return nil
+}
+
+// listAllBackups shows all available backups
+func listAllBackups() error {
+	backups, err := core.ListBackups()
+	if err != nil {
+		return fmt.Errorf("listing backups: %w", err)
+	}
+
+	if len(backups) == 0 {
+		fmt.Println("No backups found.")
+		return nil
+	}
+
+	fmt.Println("Available backups:")
+	fmt.Println("")
+
+	currentDate := ""
+	for _, b := range backups {
+		date := b.Timestamp.Format("2006-01-02")
+		if date != currentDate {
+			if currentDate != "" {
+				fmt.Println("")
+			}
+			fmt.Printf("[%s]\n", date)
+			currentDate = date
+		}
+
+		fmt.Printf("  %s  %s  (%d bytes)\n",
+			b.Timestamp.Format("15:04:05"),
+			b.SourcePath,
+			b.Size,
+		)
+	}
+
+	fmt.Printf("\n%d backup(s) total\n", len(backups))
+	return nil
+}
+
+// confirmRestore prompts for confirmation
+func confirmRestore() bool {
+	fmt.Print("Continue? [y/N]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+
+	return input == "y" || input == "yes"
+}
+
+// getFilename extracts filename from a path
+func getFilename(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[i+1:]
+		}
+	}
+	return path
 }
