@@ -15,10 +15,16 @@ type Operation interface {
 	Describe() string // Human-readable description
 }
 
-// Transaction represents a sequence of operations that can be rolled back
+// Transaction represents a sequence of operations that can be rolled back.
+//
+// Two usage patterns:
+// 1. Direct execution: call Execute(op) for each operation immediately
+// 2. Planned execution: add operations to tx.operations, then call ExecuteAll()
+//
+// Both patterns track executed operations in 'executed' for rollback.
 type Transaction struct {
-	operations []Operation
-	executed   []Operation // Operations that have been executed
+	operations []Operation // Planned operations (for ExecuteAll pattern)
+	executed   []Operation // Operations that have been executed (for rollback)
 	committed  bool
 }
 
@@ -312,8 +318,10 @@ func (op *WriteFileOp) Describe() string {
 // Compound Operations (for convenience)
 // ============================================================================
 
-// AddFileTransaction creates a transaction for adding a file to dotcor
-// Steps: backup -> move to repo -> create symlink -> add to config
+// AddFileTransaction creates a transaction for adding a file to dotcor.
+// It builds a planned transaction - call ExecuteAll() to run the operations.
+// Steps: move to repo -> create symlink -> add to config
+// Note: Backup is handled separately by the caller (backups are kept regardless of rollback).
 func AddFileTransaction(cfg *config.Config, sourcePath string, repoPath string, mf config.ManagedFile) (*Transaction, error) {
 	tx := NewTransaction()
 
@@ -328,8 +336,6 @@ func AddFileTransaction(cfg *config.Config, sourcePath string, repoPath string, 
 	if err != nil {
 		return nil, err
 	}
-
-	// Note: Backup is handled separately (not in transaction - we want to keep backups)
 
 	// 1. Move file to repo
 	tx.operations = append(tx.operations, &MoveFileOp{
