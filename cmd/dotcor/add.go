@@ -189,16 +189,20 @@ func processAddFile(cfg *config.Config, sourcePath string, category string, forc
 	// Generate repo path
 	customRepoPath := ""
 	if category != "" {
-		customRepoPath = category
+		// Category should be combined with the filename, not replace the entire path
+		// e.g., --category shell for ~/.zshrc should produce "shell/zshrc"
+		filename := filepath.Base(expanded)
+		// Strip leading dot from filename for repo path
+		repoFilename := strings.TrimPrefix(filename, ".")
+		customRepoPath = filepath.Join(category, repoFilename)
 	}
 	repoPath, err := config.GenerateRepoPath(sourcePath, customRepoPath)
 	if err != nil {
 		return addResultError, "", fmt.Errorf("generating repo path: %w", err)
 	}
 
-	// Get full repo file path
-	fullRepoPath, err := config.GetRepoFilePath(cfg, repoPath)
-	if err != nil {
+	// Validate repo file path can be constructed
+	if _, err := config.GetRepoFilePath(cfg, repoPath); err != nil {
 		return addResultError, "", err
 	}
 
@@ -243,7 +247,8 @@ func processAddFile(cfg *config.Config, sourcePath string, category string, forc
 	tx.Commit()
 	fmt.Printf("  ✓ %s\n", normalized)
 
-	return addResultSuccess, fullRepoPath, nil
+	// Return relative repoPath (consistent with dry-run return)
+	return addResultSuccess, repoPath, nil
 }
 
 // expandGlobArg expands a single argument that may contain glob patterns
