@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -145,26 +146,33 @@ func outputHistoryOneline(commits []git.CommitInfo) error {
 	return nil
 }
 
+// commitJSONOutput represents a commit in JSON format
+type commitJSONOutput struct {
+	Hash    string `json:"hash"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+	Message string `json:"message"`
+}
+
 // outputHistoryJSON outputs history as JSON
 func outputHistoryJSON(commits []git.CommitInfo) error {
-	fmt.Println("[")
+	output := make([]commitJSONOutput, 0, len(commits))
 
-	for i, c := range commits {
-		comma := ","
-		if i == len(commits)-1 {
-			comma = ""
-		}
-
-		fmt.Printf("  {\"hash\": \"%s\", \"author\": \"%s\", \"date\": \"%s\", \"message\": \"%s\"}%s\n",
-			c.Hash,
-			escapeJSON(c.Author),
-			c.Date.Format("2006-01-02T15:04:05Z07:00"),
-			escapeJSON(c.Message),
-			comma,
-		)
+	for _, c := range commits {
+		output = append(output, commitJSONOutput{
+			Hash:    c.Hash,
+			Author:  c.Author,
+			Date:    c.Date.Format("2006-01-02T15:04:05Z07:00"),
+			Message: c.Message,
+		})
 	}
 
-	fmt.Println("]")
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding JSON: %w", err)
+	}
+
+	fmt.Println(string(data))
 	return nil
 }
 
@@ -174,26 +182,4 @@ func truncateMessage(msg string, maxLen int) string {
 		return msg
 	}
 	return msg[:maxLen-3] + "..."
-}
-
-// escapeJSON escapes a string for JSON output
-func escapeJSON(s string) string {
-	result := ""
-	for _, c := range s {
-		switch c {
-		case '"':
-			result += "\\\""
-		case '\\':
-			result += "\\\\"
-		case '\n':
-			result += "\\n"
-		case '\r':
-			result += "\\r"
-		case '\t':
-			result += "\\t"
-		default:
-			result += string(c)
-		}
-	}
-	return result
 }

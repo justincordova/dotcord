@@ -73,31 +73,28 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Current backups: %d files, %s\n", backupCount, formatSize(totalSize))
 	fmt.Println("")
 
-	// Preview what would be deleted
-	if dryRun {
-		fmt.Println("Dry run - no changes will be made:")
-		fmt.Println("")
-	}
-
-	// Calculate what would be deleted
-	deleted, freedSpace, err := core.CleanOldBackups(duration, keep)
+	// Preview what would be deleted (doesn't actually delete)
+	candidates, freedSpace, err := core.PreviewCleanup(duration, keep)
 	if err != nil {
-		return fmt.Errorf("cleaning backups: %w", err)
+		return fmt.Errorf("previewing cleanup: %w", err)
 	}
 
-	if deleted == 0 {
+	if len(candidates) == 0 {
 		fmt.Println("No backups match cleanup criteria.")
 		return nil
 	}
 
+	// Dry run - just show what would be deleted
 	if dryRun {
-		fmt.Printf("Would delete %d backup set(s), freeing %s\n", deleted, formatSize(freedSpace))
+		fmt.Println("Dry run - no changes will be made:")
+		fmt.Println("")
+		fmt.Printf("Would delete %d backup set(s), freeing %s\n", len(candidates), formatSize(freedSpace))
 		return nil
 	}
 
 	// Confirmation
 	if !force {
-		fmt.Printf("Delete %d backup set(s), freeing %s? [y/N]: ", deleted, formatSize(freedSpace))
+		fmt.Printf("Delete %d backup set(s), freeing %s? [y/N]: ", len(candidates), formatSize(freedSpace))
 
 		reader := bufio.NewReader(os.Stdin)
 		input, _ := reader.ReadString('\n')
@@ -107,6 +104,12 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 			fmt.Println("Cancelled.")
 			return nil
 		}
+	}
+
+	// Actually delete
+	deleted, freedSpace, err := core.CleanOldBackups(duration, keep)
+	if err != nil {
+		return fmt.Errorf("cleaning backups: %w", err)
 	}
 
 	fmt.Printf("✓ Removed %d backup set(s), freed %s\n", deleted, formatSize(freedSpace))

@@ -93,11 +93,12 @@ func runClone(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Acquire lock
-	if err := core.AcquireLock(); err != nil {
-		// If we can't acquire (dir doesn't exist yet), continue
+	// Acquire lock - may fail if directory is new, which is expected
+	lockErr := core.AcquireLock()
+	if lockErr == nil {
+		defer core.ReleaseLock()
 	}
-	defer core.ReleaseLock()
+	// Note: Lock acquisition failure is expected when cloning to a new directory
 
 	// Create config directory structure
 	fmt.Println("Setting up DotCor...")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -322,39 +323,66 @@ func outputStatusQuick(status StatusReport) error {
 	return nil
 }
 
+// statusJSONOutput represents the JSON structure for status output
+type statusJSONOutput struct {
+	TotalFiles       int              `json:"total_files"`
+	HealthyFiles     int              `json:"healthy_files"`
+	ProblematicFiles int              `json:"problematic_files"`
+	Git              *gitJSONOutput   `json:"git,omitempty"`
+	Files            []fileJSONOutput `json:"files"`
+}
+
+type gitJSONOutput struct {
+	Branch       string `json:"branch"`
+	Uncommitted  bool   `json:"uncommitted"`
+	Ahead        int    `json:"ahead"`
+	Behind       int    `json:"behind"`
+	RemoteExists bool   `json:"remote_exists"`
+}
+
+type fileJSONOutput struct {
+	Source  string `json:"source"`
+	Status  string `json:"status"`
+	Problem string `json:"problem"`
+}
+
 // outputStatusJSON outputs status as JSON
 func outputStatusJSON(status StatusReport) error {
-	fmt.Println("{")
-	fmt.Printf("  \"total_files\": %d,\n", status.Statistics.TotalFiles)
-	fmt.Printf("  \"healthy_files\": %d,\n", status.Statistics.HealthyFiles)
-	fmt.Printf("  \"problematic_files\": %d,\n", status.Statistics.ProblematicFiles)
-
-	if status.GitStatus.IsRepo {
-		fmt.Println("  \"git\": {")
-		fmt.Printf("    \"branch\": \"%s\",\n", status.GitStatus.Branch)
-		fmt.Printf("    \"uncommitted\": %t,\n", status.GitStatus.HasUncommitted)
-		fmt.Printf("    \"ahead\": %d,\n", status.GitStatus.AheadBy)
-		fmt.Printf("    \"behind\": %d,\n", status.GitStatus.BehindBy)
-		fmt.Printf("    \"remote_exists\": %t\n", status.GitStatus.RemoteExists)
-		fmt.Println("  },")
+	output := statusJSONOutput{
+		TotalFiles:       status.Statistics.TotalFiles,
+		HealthyFiles:     status.Statistics.HealthyFiles,
+		ProblematicFiles: status.Statistics.ProblematicFiles,
+		Files:            make([]fileJSONOutput, 0, len(status.Files)),
 	}
 
-	fmt.Println("  \"files\": [")
-	for i, f := range status.Files {
-		comma := ","
-		if i == len(status.Files)-1 {
-			comma = ""
+	if status.GitStatus.IsRepo {
+		output.Git = &gitJSONOutput{
+			Branch:       status.GitStatus.Branch,
+			Uncommitted:  status.GitStatus.HasUncommitted,
+			Ahead:        status.GitStatus.AheadBy,
+			Behind:       status.GitStatus.BehindBy,
+			RemoteExists: status.GitStatus.RemoteExists,
 		}
+	}
+
+	for _, f := range status.Files {
 		problem := f.Problem
 		if problem == "" {
 			problem = "none"
 		}
-		fmt.Printf("    {\"source\": \"%s\", \"status\": \"%s\", \"problem\": \"%s\"}%s\n",
-			f.SourcePath, f.Status, problem, comma)
+		output.Files = append(output.Files, fileJSONOutput{
+			Source:  f.SourcePath,
+			Status:  f.Status,
+			Problem: problem,
+		})
 	}
-	fmt.Println("  ]")
-	fmt.Println("}")
 
+	data, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encoding JSON: %w", err)
+	}
+
+	fmt.Println(string(data))
 	return nil
 }
 
@@ -406,3 +434,5 @@ func getLockPathForCheck() (string, error) {
 	}
 	return configDir + "/.lock", nil
 }
+
+// Note: getDir and resolvePath are defined in list.go

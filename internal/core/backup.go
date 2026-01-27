@@ -143,26 +143,23 @@ func ListBackups() ([]BackupInfo, error) {
 			return nil // Skip files we can't process
 		}
 
-		// Extract timestamp from directory name
-		parts := filepath.SplitList(relPath)
-		if len(parts) == 0 {
-			parts = []string{filepath.Dir(relPath)}
-		}
-
+		// Get the parent directory (timestamp directory)
 		timestampStr := filepath.Dir(relPath)
 		if timestampStr == "." {
 			return nil // Skip files directly in backup dir
 		}
 
-		// Parse timestamp
-		timestamp, err := time.Parse(TimestampFormat, filepath.Base(timestampStr))
+		// For nested paths, get the first directory component (the timestamp)
+		// e.g., "2024-01-15_10-30-00/subdir/file.txt" -> "2024-01-15_10-30-00"
+		firstDir := timestampStr
+		if idx := findPathSeparator(timestampStr); idx != -1 {
+			firstDir = timestampStr[:idx]
+		}
+
+		// Parse timestamp from the first directory component
+		timestamp, err := time.Parse(TimestampFormat, firstDir)
 		if err != nil {
-			// Try to get from directory name directly
-			dirName := filepath.Base(filepath.Dir(path))
-			timestamp, err = time.Parse(TimestampFormat, dirName)
-			if err != nil {
-				return nil // Skip if we can't parse timestamp
-			}
+			return nil // Skip if we can't parse timestamp
 		}
 
 		backups = append(backups, BackupInfo{
@@ -187,22 +184,74 @@ func ListBackups() ([]BackupInfo, error) {
 	return backups, nil
 }
 
+// findPathSeparator finds the first path separator in a string
+func findPathSeparator(s string) int {
+	for i, c := range s {
+		if c == '/' || c == filepath.Separator {
+			return i
+		}
+	}
+	return -1
+}
+
+// CleanupCandidate represents a backup directory that can be cleaned up
+type CleanupCandidate struct {
+	Path      string
+	Timestamp time.Time
+	Size      int64
+}
+
+// PreviewCleanup returns what would be deleted without actually deleting
+func PreviewCleanup(olderThan time.Duration, keepLast int) ([]CleanupCandidate, int64, error) {
+	candidates, _, err := getCleanupCandidates(olderThan, keepLast)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var totalSize int64
+	for _, c := range candidates {
+		totalSize += c.Size
+	}
+
+	return candidates, totalSize, nil
+}
+
 // CleanOldBackups removes backups older than specified duration, keeping at least keepLast
 func CleanOldBackups(olderThan time.Duration, keepLast int) (int, int64, error) {
-	backupDir, err := GetBackupDir()
+	candidates, totalSize, err := getCleanupCandidates(olderThan, keepLast)
 	if err != nil {
 		return 0, 0, err
 	}
 
+	// Delete old directories
+	deleted := 0
+	for _, candidate := range candidates {
+		if err := fs.RemoveAll(candidate.Path); err != nil {
+			// Continue deleting others even if one fails
+			continue
+		}
+		deleted++
+	}
+
+	return deleted, totalSize, nil
+}
+
+// getCleanupCandidates returns backup directories that match cleanup criteria
+func getCleanupCandidates(olderThan time.Duration, keepLast int) ([]CleanupCandidate, int64, error) {
+	backupDir, err := GetBackupDir()
+	if err != nil {
+		return nil, 0, err
+	}
+
 	// Check if backup directory exists
 	if !fs.PathExists(backupDir) {
-		return 0, 0, nil
+		return nil, 0, nil
 	}
 
 	// Get list of timestamp directories
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
-		return 0, 0, fmt.Errorf("reading backup directory: %w", err)
+		return nil, 0, fmt.Errorf("reading backup directory: %w", err)
 	}
 
 	// Parse and sort directories by timestamp
@@ -237,7 +286,7 @@ func CleanOldBackups(olderThan time.Duration, keepLast int) (int, int64, error) 
 
 	// Determine which directories to delete
 	cutoff := time.Now().Add(-olderThan)
-	var toDelete []string
+	var candidates []CleanupCandidate
 	var totalSize int64
 
 	for i, dir := range dirs {
@@ -251,21 +300,15 @@ func CleanOldBackups(olderThan time.Duration, keepLast int) (int, int64, error) 
 			// Calculate size
 			size, _ := getDirSize(dir.path)
 			totalSize += size
-			toDelete = append(toDelete, dir.path)
+			candidates = append(candidates, CleanupCandidate{
+				Path:      dir.path,
+				Timestamp: dir.timestamp,
+				Size:      size,
+			})
 		}
 	}
 
-	// Delete old directories
-	deleted := 0
-	for _, path := range toDelete {
-		if err := fs.RemoveAll(path); err != nil {
-			// Continue deleting others even if one fails
-			continue
-		}
-		deleted++
-	}
-
-	return deleted, totalSize, nil
+	return candidates, totalSize, nil
 }
 
 // getDirSize calculates the total size of a directory
