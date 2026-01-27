@@ -22,8 +22,8 @@ type LockInfo struct {
 	Hostname  string
 }
 
-// Lock timeout duration
-const LockTimeout = 30 * time.Second
+// LockTimeout is the duration after which a lock is considered stale
+const LockTimeout = time.Hour
 
 // ErrLockHeld is returned when lock is already held by another process
 var ErrLockHeld = errors.New("lock is held by another process")
@@ -41,6 +41,7 @@ func getLockPath() (string, error) {
 }
 
 // AcquireLock acquires file-based lock for dotcor operations
+// Uses O_EXCL for atomic lock creation to prevent race conditions
 // Returns error if lock is already held
 func AcquireLock() error {
 	lockPath, err := getLockPath()
@@ -53,27 +54,53 @@ func AcquireLock() error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	// Check if lock file exists
-	if fs.FileExists(lockPath) {
-		// Check if lock is stale
-		stale, err := IsStale(lockPath)
-		if err != nil {
-			return fmt.Errorf("checking stale lock: %w", err)
-		}
+	// Try atomic lock creation with O_EXCL
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			// Lock file exists, check if stale
+			stale, staleErr := IsStale(lockPath)
+			if staleErr != nil {
+				return fmt.Errorf("checking stale lock: %w", staleErr)
+			}
 
-		if stale {
-			// Offer suggestion to clear stale lock
+			if stale {
+				// Try to remove stale lock and retry
+				if removeErr := os.Remove(lockPath); removeErr != nil {
+					info, _ := ReadLockInfo(lockPath)
+					return fmt.Errorf("%w: PID %d (process appears dead). Run 'dotcor doctor --fix' to clear", ErrStaleLock, info.PID)
+				}
+				// Retry lock acquisition after removing stale lock
+				return AcquireLock()
+			}
+
+			// Lock is held by active process
 			info, _ := ReadLockInfo(lockPath)
-			return fmt.Errorf("%w: PID %d (process appears dead). Run 'dotcor doctor --fix' to clear", ErrStaleLock, info.PID)
+			return fmt.Errorf("%w: PID %d on %s. If this is incorrect, run 'dotcor doctor --fix'", ErrLockHeld, info.PID, info.Hostname)
 		}
+		return fmt.Errorf("creating lock file: %w", err)
+	}
+	defer f.Close()
 
-		// Lock is held by active process
-		info, _ := ReadLockInfo(lockPath)
-		return fmt.Errorf("%w: PID %d on %s. If this is incorrect, run 'dotcor doctor --fix'", ErrLockHeld, info.PID, info.Hostname)
+	// Write lock content
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
 	}
 
-	// Create lock file
-	return writeLockFile(lockPath)
+	content := fmt.Sprintf("%d\n%s\n%s\n",
+		os.Getpid(),
+		time.Now().Format(time.RFC3339),
+		hostname,
+	)
+
+	if _, err := f.WriteString(content); err != nil {
+		// Clean up on write failure
+		os.Remove(lockPath)
+		return fmt.Errorf("writing lock file: %w", err)
+	}
+
+	return nil
 }
 
 // ReleaseLock releases the file lock
@@ -136,8 +163,8 @@ func IsStale(lockPath string) (bool, error) {
 		return true, nil // Malformed lock file is considered stale
 	}
 
-	// Check if lock is very old (more than 1 hour)
-	if time.Since(info.Timestamp) > time.Hour {
+	// Check if lock is older than LockTimeout
+	if time.Since(info.Timestamp) > LockTimeout {
 		return true, nil
 	}
 
@@ -161,6 +188,9 @@ func ClearStaleLock() error {
 		return nil // No lock to clear
 	}
 
+	// Read lock info for error messages
+	info, infoErr := ReadLockInfo(lockPath)
+
 	// Verify it's actually stale
 	stale, err := IsStale(lockPath)
 	if err != nil {
@@ -168,7 +198,10 @@ func ClearStaleLock() error {
 	}
 
 	if !stale {
-		return fmt.Errorf("lock is not stale (process %d is still running)", os.Getpid())
+		if infoErr == nil {
+			return fmt.Errorf("lock is not stale (process %d is still running)", info.PID)
+		}
+		return fmt.Errorf("lock is not stale")
 	}
 
 	return os.Remove(lockPath)
@@ -205,22 +238,6 @@ func ReadLockInfo(lockPath string) (LockInfo, error) {
 	}, nil
 }
 
-// writeLockFile writes lock information to file
-func writeLockFile(lockPath string) error {
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
-	}
-
-	content := fmt.Sprintf("%d\n%s\n%s\n",
-		os.Getpid(),
-		time.Now().Format(time.RFC3339),
-		hostname,
-	)
-
-	return os.WriteFile(lockPath, []byte(content), 0644)
-}
-
 // isProcessAlive checks if a process with given PID is still running
 func isProcessAlive(pid int) (bool, error) {
 	if runtime.GOOS == "windows" {
@@ -247,16 +264,20 @@ func isProcessAliveUnix(pid int) (bool, error) {
 }
 
 // isProcessAliveWindows checks if process is alive on Windows
+// Note: On Windows, os.FindProcess always succeeds, so we check
+// if we can signal the process. This is imperfect but works for
+// most cases where the PID has been reused or the process is gone.
 func isProcessAliveWindows(pid int) (bool, error) {
-	// On Windows, FindProcess always succeeds
-	// We need to try to open the process to check if it exists
+	// On Windows, we try to find and signal the process
+	// FindProcess on Windows doesn't actually verify the process exists
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false, nil
 	}
 
-	// Try to signal - on Windows this will fail if process doesn't exist
-	// We use a different approach: check if we can find process info
+	// On Windows, Signal(0) returns an error if process doesn't exist
+	// or we don't have permission. We treat both as "not alive" for
+	// lock staleness purposes since either way we can't communicate with it.
 	err = process.Signal(syscall.Signal(0))
 	if err != nil {
 		return false, nil
