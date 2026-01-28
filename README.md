@@ -23,7 +23,8 @@ DotCor combines the simplicity of GNU Stow with the convenience of automatic Git
 
 **Homebrew (macOS/Linux):**
 ```bash
-brew install justincordova/dotcor/dotcor
+brew tap justincordova/dotcor
+brew install dotcor
 ```
 
 **From source:**
