@@ -107,12 +107,18 @@ func runCleanup(cmd *cobra.Command, args []string) error {
 	}
 
 	// Actually delete
-	deleted, freedSpace, err := core.CleanOldBackups(duration, keep)
+	deleted, failed, freedSpace, err := core.CleanOldBackups(duration, keep)
 	if err != nil {
-		return fmt.Errorf("cleaning backups: %w", err)
+		// Report partial success if some deletions worked
+		if deleted > 0 {
+			fmt.Printf("⚠ Removed %d backup set(s), freed %s\n", deleted, formatSize(freedSpace))
+			fmt.Printf("  Failed to remove %d backup set(s): %v\n", failed, err)
+		} else {
+			return fmt.Errorf("cleaning backups: %w", err)
+		}
+	} else {
+		fmt.Printf("✓ Removed %d backup set(s), freed %s\n", deleted, formatSize(freedSpace))
 	}
-
-	fmt.Printf("✓ Removed %d backup set(s), freed %s\n", deleted, formatSize(freedSpace))
 
 	// Show new stats
 	newCount, _ := core.GetBackupCount()

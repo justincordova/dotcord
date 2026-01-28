@@ -216,24 +216,32 @@ func PreviewCleanup(olderThan time.Duration, keepLast int) ([]CleanupCandidate, 
 	return candidates, totalSize, nil
 }
 
-// CleanOldBackups removes backups older than specified duration, keeping at least keepLast
-func CleanOldBackups(olderThan time.Duration, keepLast int) (int, int64, error) {
-	candidates, totalSize, err := getCleanupCandidates(olderThan, keepLast)
+// CleanOldBackups removes backups older than specified duration, keeping at least keepLast.
+// Returns: number deleted, number of errors, total freed size, first error encountered.
+// Continues deleting even if some deletions fail.
+func CleanOldBackups(olderThan time.Duration, keepLast int) (deleted int, failed int, freedSize int64, err error) {
+	candidates, _, err := getCleanupCandidates(olderThan, keepLast)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
+	var firstErr error
+	var actualFreed int64
+
 	// Delete old directories
-	deleted := 0
 	for _, candidate := range candidates {
 		if err := fs.RemoveAll(candidate.Path); err != nil {
-			// Continue deleting others even if one fails
+			failed++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("removing %s: %w", candidate.Path, err)
+			}
 			continue
 		}
 		deleted++
+		actualFreed += candidate.Size
 	}
 
-	return deleted, totalSize, nil
+	return deleted, failed, actualFreed, firstErr
 }
 
 // getCleanupCandidates returns backup directories that match cleanup criteria
