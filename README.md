@@ -21,17 +21,17 @@ DotCor combines the simplicity of GNU Stow with the convenience of automatic Git
 
 ### Installation
 
+**Homebrew (macOS/Linux):**
 ```bash
-# Clone the repository
+brew install justincordova/dotcor/dotcor
+```
+
+**From source:**
+```bash
 git clone https://github.com/justincordova/dotcor.git
 cd dotcor
-
-# Build and install
 go build -o dotcor cmd/dotcor/main.go
 sudo mv dotcor /usr/local/bin/
-
-# Or just run directly
-go run cmd/dotcor/main.go
 ```
 
 ### Basic Usage
