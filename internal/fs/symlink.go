@@ -24,8 +24,9 @@ type SymlinkStatus struct {
 	ActualTarget string // The actual target path of the symlink
 }
 
-// CreateSymlink creates a RELATIVE symlink from link to target
-// Returns error if symlink fails (NO COPY FALLBACK)
+// CreateSymlink creates a RELATIVE symlink at `link` pointing to `target`.
+// The symlink uses a relative path computed from link's location to target.
+// Returns error if symlink fails (NO COPY FALLBACK).
 func CreateSymlink(target, link string) error {
 	// Check if platform supports symlinks
 	supported, err := SupportsSymlinks()
@@ -200,7 +201,7 @@ func SupportsSymlinks() (bool, error) {
 	if err != nil {
 		return false, nil // Symlinks not supported
 	}
-	os.Remove(testLink)
+	defer os.Remove(testLink) // Clean up test symlink
 
 	return true, nil
 }
