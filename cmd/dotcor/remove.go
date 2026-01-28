@@ -166,7 +166,10 @@ func processRemoveFile(cfg *config.Config, mf config.ManagedFile, keepRepo bool,
 	}
 
 	// Check if source is a symlink
-	isLink, _ := fs.IsSymlink(sourcePath)
+	isLink, err := fs.IsSymlink(sourcePath)
+	if err != nil {
+		return fmt.Errorf("checking symlink status: %w", err)
+	}
 
 	// If keeping repo, just remove symlink and update config
 	if keepRepo {
@@ -189,7 +192,9 @@ func processRemoveFile(cfg *config.Config, mf config.ManagedFile, keepRepo bool,
 
 	// First, create backup of the repo file
 	if fs.FileExists(repoPath) {
-		core.CreateBackup(repoPath)
+		if _, err := core.CreateBackup(repoPath); err != nil {
+			fmt.Printf("  ⚠ Backup failed for %s: %v\n", mf.RepoPath, err)
+		}
 	}
 
 	// Ensure parent directory exists
