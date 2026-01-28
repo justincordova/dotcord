@@ -117,10 +117,14 @@ func runAdopt(cmd *cobra.Command, args []string) error {
 
 	// Git commit (config changed, but no new files)
 	if git.IsGitInstalled() && adopted > 0 && !dryRun {
-		repoPath, _ := config.ExpandPath(cfg.RepoPath)
-		message := fmt.Sprintf("Adopt %d existing symlink(s)", adopted)
-		if err := git.AutoCommit(repoPath, message); err != nil {
-			fmt.Printf("⚠ Git commit failed: %v\n", err)
+		repoPath, err := config.ExpandPath(cfg.RepoPath)
+		if err != nil {
+			fmt.Printf("⚠ Git commit skipped: invalid repo path: %v\n", err)
+		} else {
+			message := fmt.Sprintf("Adopt %d existing symlink(s)", adopted)
+			if err := git.AutoCommit(repoPath, message); err != nil {
+				fmt.Printf("⚠ Git commit failed: %v\n", err)
+			}
 		}
 	}
 

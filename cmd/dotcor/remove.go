@@ -128,12 +128,16 @@ func runRemove(cmd *cobra.Command, args []string) error {
 
 	// Git commit
 	if git.IsGitInstalled() && removed > 0 && !keepRepo {
-		repoPath, _ := config.ExpandPath(cfg.RepoPath)
-		message := fmt.Sprintf("Remove %d file(s) from management", removed)
-		if err := git.AutoCommit(repoPath, message); err != nil {
-			fmt.Printf("⚠ Git commit failed: %v\n", err)
+		repoPath, err := config.ExpandPath(cfg.RepoPath)
+		if err != nil {
+			fmt.Printf("⚠ Git commit skipped: invalid repo path: %v\n", err)
 		} else {
-			fmt.Println("✓ Committed to Git")
+			message := fmt.Sprintf("Remove %d file(s) from management", removed)
+			if err := git.AutoCommit(repoPath, message); err != nil {
+				fmt.Printf("⚠ Git commit failed: %v\n", err)
+			} else {
+				fmt.Println("✓ Committed to Git")
+			}
 		}
 	}
 

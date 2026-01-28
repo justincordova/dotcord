@@ -300,11 +300,15 @@ func interactiveInit(cfg *config.Config) error {
 
 	// Git commit
 	if git.IsGitInstalled() && added > 0 {
-		repoPath, _ := config.ExpandPath(cfg.RepoPath)
-		if err := git.AutoCommit(repoPath, fmt.Sprintf("Add %d dotfiles via interactive init", added)); err != nil {
-			fmt.Printf("⚠ Git commit failed: %v\n", err)
+		repoPath, err := config.ExpandPath(cfg.RepoPath)
+		if err != nil {
+			fmt.Printf("⚠ Git commit skipped: invalid repo path: %v\n", err)
 		} else {
-			fmt.Println("✓ Committed to Git")
+			if err := git.AutoCommit(repoPath, fmt.Sprintf("Add %d dotfiles via interactive init", added)); err != nil {
+				fmt.Printf("⚠ Git commit failed: %v\n", err)
+			} else {
+				fmt.Println("✓ Committed to Git")
+			}
 		}
 	}
 
