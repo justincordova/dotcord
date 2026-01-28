@@ -100,8 +100,7 @@ func RemoveSymlink(link string) error {
 func IsSymlink(path string) (bool, error) {
 	expandedPath, err := config.ExpandPath(path)
 	if err != nil {
-		// If path doesn't exist or can't be expanded, it's not a symlink
-		expandedPath = path
+		return false, fmt.Errorf("expanding path: %w", err)
 	}
 
 	info, err := os.Lstat(expandedPath)
@@ -119,7 +118,7 @@ func IsSymlink(path string) (bool, error) {
 func ReadSymlink(link string) (string, error) {
 	expandedLink, err := config.ExpandPath(link)
 	if err != nil {
-		expandedLink = link
+		return "", fmt.Errorf("expanding path: %w", err)
 	}
 
 	target, err := os.Readlink(expandedLink)
@@ -135,7 +134,7 @@ func ReadSymlink(link string) (string, error) {
 func IsValidSymlink(link string) (bool, error) {
 	expandedLink, err := config.ExpandPath(link)
 	if err != nil {
-		expandedLink = link
+		return false, fmt.Errorf("expanding path: %w", err)
 	}
 
 	// Check if it's a symlink
@@ -212,7 +211,7 @@ func GetSymlinkStatus(linkPath string, expectedTarget string) (SymlinkStatus, er
 
 	expandedLink, err := config.ExpandPath(linkPath)
 	if err != nil {
-		expandedLink = linkPath
+		return status, fmt.Errorf("expanding link path: %w", err)
 	}
 
 	// Check if path exists
@@ -257,7 +256,7 @@ func GetSymlinkStatus(linkPath string, expectedTarget string) (SymlinkStatus, er
 	if expectedTarget != "" {
 		expandedExpected, err := config.ExpandPath(expectedTarget)
 		if err != nil {
-			expandedExpected = expectedTarget
+			return status, fmt.Errorf("expanding expected target path: %w", err)
 		}
 
 		// Clean both paths for comparison
@@ -273,7 +272,7 @@ func GetSymlinkStatus(linkPath string, expectedTarget string) (SymlinkStatus, er
 func ResolveSymlink(link string) (string, error) {
 	expandedLink, err := config.ExpandPath(link)
 	if err != nil {
-		expandedLink = link
+		return "", fmt.Errorf("expanding path: %w", err)
 	}
 
 	// Read the symlink target
@@ -308,7 +307,7 @@ func SymlinkPointsToRepo(link string, repoPath string) (bool, error) {
 
 	expandedRepo, err := config.ExpandPath(repoPath)
 	if err != nil {
-		expandedRepo = repoPath
+		return false, fmt.Errorf("expanding repo path: %w", err)
 	}
 
 	// Check if resolved path is under repo
