@@ -14,13 +14,35 @@ var (
 	version = "0.1.0"
 )
 
-const banner = `
-     _       _
-  __| | ___ | |_ ___ ___  _ __
- / _` + "`" + ` |/ _ \| __/ __/ _ \| '__|
-| (_| | (_) | || (_| (_) | |
- \__,_|\___/ \__\___\___/|_|
-`
+// ANSI color codes
+const (
+	colorReset   = "\033[0m"
+	colorDim     = "\033[2m"
+	colorBold    = "\033[1m"
+	colorGreen   = "\033[32m"
+	colorYellow  = "\033[33m"
+	colorCyan    = "\033[36m"
+	colorWhite   = "\033[97m"
+	colorOrange  = "\033[38;5;208m"
+	colorPink    = "\033[38;5;205m"
+	colorLightPink = "\033[38;5;218m"
+	colorLime    = "\033[38;5;118m"
+)
+
+func printBanner() {
+	fmt.Println()
+	fmt.Print(colorLightPink)
+	fmt.Println("  ██████╗  ██████╗ ████████╗ ██████╗ ██████╗ ██████╗ ")
+	fmt.Println("  ██╔══██╗██╔═══██╗╚══██╔══╝██╔════╝██╔═══██╗██╔══██╗")
+	fmt.Println("  ██║  ██║██║   ██║   ██║   ██║     ██║   ██║██████╔╝")
+	fmt.Println("  ██║  ██║██║   ██║   ██║   ██║     ██║   ██║██╔══██╗")
+	fmt.Println("  ██████╔╝╚██████╔╝   ██║   ╚██████╗╚██████╔╝██║  ██║")
+	fmt.Println("  ╚═════╝  ╚═════╝    ╚═╝    ╚═════╝ ╚═════╝ ╚═╝  ╚═╝")
+	fmt.Print(colorReset)
+	fmt.Println()
+	fmt.Printf("  %s%sv%s%s %s· symlink-based dotfile manager%s\n", colorBold, colorLightPink, version, colorReset, colorDim, colorReset)
+	fmt.Println()
+}
 
 func init() {
 	viper.SetDefault("version", version)
@@ -38,22 +60,18 @@ appear in your repository. Built-in Git automation handles commits and sync.`,
 }
 
 func runRoot(cmd *cobra.Command, args []string) {
-	// Print banner
-	fmt.Print("\033[36m") // Cyan color
-	fmt.Print(banner)
-	fmt.Print("\033[0m") // Reset color
-	fmt.Printf("  v%s - Symlink-based dotfile manager\n\n", version)
+	printBanner()
 
 	// Try to load config and show status
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		// Not initialized
-		fmt.Println("\033[33m⚠ DotCor is not initialized\033[0m")
-		fmt.Println("")
-		fmt.Println("Get started:")
-		fmt.Println("  dotcor init          Initialize DotCor")
-		fmt.Println("  dotcor --help        Show all commands")
-		fmt.Println("")
+		fmt.Printf("  %s⚠ Not initialized%s\n", colorYellow, colorReset)
+		fmt.Println()
+		fmt.Printf("  %sGet started:%s\n", colorDim, colorReset)
+		fmt.Println("    dotcor init          Initialize DotCor")
+		fmt.Println("    dotcor --help        Show all commands")
+		fmt.Println()
 		return
 	}
 
@@ -74,19 +92,18 @@ func showQuickStatus(cfg *config.Config) {
 		}
 	}
 
+	// Status section
+	fmt.Printf("  %sStatus%s\n", colorBold, colorReset)
+	fmt.Printf("  %s──────%s\n", colorDim, colorReset)
+
 	// Files status
 	if totalFiles == 0 {
-		fmt.Println("📁 No files managed yet")
-		fmt.Println("")
-		fmt.Println("Get started:")
-		fmt.Println("  dotcor add ~/.zshrc    Add a dotfile")
-		fmt.Println("  dotcor list            List managed files")
-		fmt.Println("")
+		fmt.Printf("  %s○%s No files managed\n", colorDim, colorReset)
 	} else {
 		if problemCount == 0 {
-			fmt.Printf("\033[32m✓ %d file(s) managed, all healthy\033[0m\n", totalFiles)
+			fmt.Printf("  %s●%s %d file(s) %s✓%s\n", colorGreen, colorReset, totalFiles, colorGreen, colorReset)
 		} else {
-			fmt.Printf("\033[33m⚠ %d file(s) managed, %d with issues\033[0m\n", totalFiles, problemCount)
+			fmt.Printf("  %s●%s %d file(s), %s%d with issues%s\n", colorYellow, colorReset, totalFiles, colorYellow, problemCount, colorReset)
 		}
 	}
 
@@ -96,29 +113,25 @@ func showQuickStatus(cfg *config.Config) {
 		gitStatus, err := git.GetStatus(repoPath)
 		if err == nil {
 			if gitStatus.HasUncommitted {
-				fmt.Println("\033[33m⚠ Uncommitted changes\033[0m")
+				fmt.Printf("  %s○%s uncommitted changes\n", colorYellow, colorReset)
 			} else {
-				fmt.Println("\033[32m✓ Working tree clean\033[0m")
+				fmt.Printf("  %s●%s clean %s✓%s\n", colorGreen, colorReset, colorGreen, colorReset)
 			}
 
 			if gitStatus.RemoteExists {
 				if gitStatus.AheadBy > 0 {
-					fmt.Printf("\033[36m↑ %d commit(s) to push\033[0m\n", gitStatus.AheadBy)
+					fmt.Printf("  %s↑%s %d to push\n", colorCyan, colorReset, gitStatus.AheadBy)
 				}
 				if gitStatus.BehindBy > 0 {
-					fmt.Printf("\033[36m↓ %d commit(s) to pull\033[0m\n", gitStatus.BehindBy)
+					fmt.Printf("  %s↓%s %d to pull\n", colorCyan, colorReset, gitStatus.BehindBy)
 				}
 			}
 		}
 	}
 
-	fmt.Println("")
-	fmt.Println("Commands:")
-	fmt.Println("  dotcor status     Full status")
-	fmt.Println("  dotcor add        Add dotfiles")
-	fmt.Println("  dotcor sync       Commit & push")
-	fmt.Println("  dotcor --help     All commands")
-	fmt.Println("")
+	fmt.Println()
+	fmt.Printf("  %sCommands:%s  status · add · sync · --help\n", colorDim, colorReset)
+	fmt.Println()
 }
 
 func main() {
