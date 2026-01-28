@@ -100,8 +100,27 @@ func Sync(repoPath string) error {
 		return nil // No remote configured, skip push
 	}
 
-	// Push to remote
-	pushCmd := exec.Command("git", "push")
+	// Get current branch name
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = repoPath
+	branchOutput, err := branchCmd.Output()
+	if err != nil {
+		return fmt.Errorf("getting current branch: %w", err)
+	}
+	branch := strings.TrimSpace(string(branchOutput))
+
+	// Check if upstream is configured for this branch
+	upstreamCmd := exec.Command("git", "config", fmt.Sprintf("branch.%s.remote", branch))
+	upstreamCmd.Dir = repoPath
+	hasUpstream := upstreamCmd.Run() == nil
+
+	// Push to remote, set upstream if not configured
+	var pushCmd *exec.Cmd
+	if hasUpstream {
+		pushCmd = exec.Command("git", "push")
+	} else {
+		pushCmd = exec.Command("git", "push", "-u", "origin", branch)
+	}
 	pushCmd.Dir = repoPath
 	if output, err := pushCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git push failed: %s: %w", string(output), err)
